@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+
+<extension>
+
+<id>403ce3f5-da75-4a34-8e31-895eefc8ffd9</id>
+
+<name>PitchforkReviews</name>
+
+<module>Plugins::PitchforkReviews::Plugin</module>
+
+<version>0.4.5</version>
+
+<description>Browse Pitchfork album reviews on your Squeezebox and play the reviewed album from your streaming library (Qobuz / Tidal / Deezer).</description>
+
+<creator>CrystalGipsy</creator>
+
+<homepageURL>https://simonarnold002.github.io/LMS-Pitchfork-Reviews/README.html</homepageURL>
+
+<icon>plugins/PitchforkReviews/html/images/PitchforkReviewsIcon_svg.png</icon>
+
+<defaultState>enabled</defaultState>
+
+<targetApplication>
+
+<id>SlimServer</id>
+
+<minVersion>9.0.0</minVersion>
+
+<maxVersion>*</maxVersion>
+
+</targetApplication>
+
+<optionsURL>plugins/PitchforkReviews/settings.html</optionsURL>
+
+</extension>

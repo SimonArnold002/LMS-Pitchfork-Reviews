@@ -1,0 +1,68 @@
+PLUGIN_PITCHFORKREVIEWS
+	EN	Pitchfork Reviews
+
+PLUGIN_PITCHFORKREVIEWS_DESC
+	EN	Browse album reviews from Pitchfork and play the reviewed album from your streaming library.
+
+PLUGIN_PITCHFORKREVIEWS_BNM
+	EN	Best New Music
+
+PLUGIN_PITCHFORKREVIEWS_REVIEWS
+	EN	Latest Reviews
+
+PLUGIN_PITCHFORKREVIEWS_SETTINGS
+	EN	Plugin Settings
+
+PLUGIN_PITCHFORKREVIEWS_REFRESH
+	EN	Refresh (force update now)
+
+PLUGIN_PITCHFORKREVIEWS_EMPTY
+	EN	No reviews found (check the feed URL in the log)
+
+PLUGIN_PITCHFORKREVIEWS_READ_REVIEW
+	EN	Read the full review
+
+PLUGIN_PITCHFORKREVIEWS_REFRESH_MATCH
+	EN	Refresh streaming match
+
+PLUGIN_PITCHFORKREVIEWS_WEEK_OF
+	EN	Week of
+
+PLUGIN_PITCHFORKREVIEWS_WEEK
+	EN	Recent reviews
+
+PLUGIN_PITCHFORKREVIEWS_NO_MATCH
+	EN	No streaming match found
+
+PLUGIN_PITCHFORKREVIEWS_GENRE
+	EN	Genre
+
+PLUGIN_PITCHFORKREVIEWS_SERVICES
+	EN	Streaming Services
+
+PLUGIN_PITCHFORKREVIEWS_GENERAL
+	EN	General
+
+PLUGIN_PITCHFORKREVIEWS_SVC_PRIORITY
+	EN	Search priority
+
+PLUGIN_PITCHFORKREVIEWS_SVC_PRIORITY_DESC
+	EN	Lower number = searched first. 0 = never search this service. The album resolver stops at the first service that has a match.
+
+PLUGIN_PITCHFORKREVIEWS_SVC_DETECTED
+	EN	installed
+
+PLUGIN_PITCHFORKREVIEWS_SVC_NOT_DETECTED
+	EN	not installed
+
+PLUGIN_PITCHFORKREVIEWS_HIDE_UNMATCHED
+	EN	Hide non-playable reviews
+
+PLUGIN_PITCHFORKREVIEWS_HIDE_UNMATCHED_DESC
+	EN	Only show reviews whose album was found on one of your streaming services. Reviews with no playable match are hidden.
+
+PLUGIN_PITCHFORKREVIEWS_DEBUG_LOG
+	EN	Extra debug logging
+
+PLUGIN_PITCHFORKREVIEWS_DEBUG_LOG_DESC
+	EN	Also write the resolver timeline to a dedicated pfr-debug.log beside server.log (size-capped, one rotation). The same lines always go to server.log at INFO too. Turn on to diagnose a match or feed problem, off again after.

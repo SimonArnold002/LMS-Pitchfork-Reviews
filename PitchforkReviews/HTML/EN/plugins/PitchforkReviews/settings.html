@@ -1,0 +1,34 @@
+[% PROCESS settings/header.html %]
+
+<div class="prefHead collapsableSection" id="pfr_services_Header">[% "PLUGIN_PITCHFORKREVIEWS_SERVICES" | string %]</div>
+<div id="pfr_services">
+
+	[% WRAPPER setting title="PLUGIN_PITCHFORKREVIEWS_SVC_PRIORITY" desc="PLUGIN_PITCHFORKREVIEWS_SVC_PRIORITY_DESC" %]
+	<div>
+	[% FOREACH s IN pfr_services %]
+		<div style="margin:4px 0;">
+			<input type="number" name="pref_svc_priority_[% s.key %]" value="[% s.priority %]" min="0" max="9" style="width:3em;" />
+			<strong>[% s.name %]</strong>
+			&mdash;
+			[% IF s.installed %]<span style="color:#4caf50">[% 'PLUGIN_PITCHFORKREVIEWS_SVC_DETECTED' | string %]</span>[% ELSE %]<span style="opacity:0.6">[% 'PLUGIN_PITCHFORKREVIEWS_SVC_NOT_DETECTED' | string %]</span>[% END %]
+		</div>
+	[% END %]
+	</div>
+	[% END %]
+
+</div>
+
+<div class="prefHead collapsableSection" id="pfr_general_Header">[% "PLUGIN_PITCHFORKREVIEWS_GENERAL" | string %]</div>
+<div id="pfr_general">
+
+	[% WRAPPER setting title="PLUGIN_PITCHFORKREVIEWS_HIDE_UNMATCHED" desc="PLUGIN_PITCHFORKREVIEWS_HIDE_UNMATCHED_DESC" %]
+		<input type="checkbox" name="pref_hide_unmatched" value="1" [% IF prefs.hide_unmatched %]checked="checked"[% END %] />
+	[% END %]
+
+	[% WRAPPER setting title="PLUGIN_PITCHFORKREVIEWS_DEBUG_LOG" desc="PLUGIN_PITCHFORKREVIEWS_DEBUG_LOG_DESC" %]
+		<input type="checkbox" name="pref_debug_log" value="1" [% IF prefs.debug_log %]checked="checked"[% END %] />
+	[% END %]
+
+</div>
+
+[% PROCESS settings/footer.html %]
