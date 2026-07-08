@@ -1,6 +1,6 @@
 # Pitchfork Reviews — for Lyrion Music Server
 
-Browse curated album reviews inside **Lyrion Music Server (LMS)** and play the reviewed album straight from your **streaming library** — one tap to play or add to the queue. Reviews come from **Pitchfork** (Best New Music + Latest Reviews); each one is matched to a directly-playable album on **Qobuz, Tidal or Deezer**, with the service's own artwork.
+Browse curated album reviews inside **Lyrion Music Server (LMS)** and play the reviewed album straight from your **streaming library** — one tap to play or add to the queue. Reviews come from **Pitchfork** (Best New Music, High Scoring Albums + Latest Reviews); each one is matched to a directly-playable album on **Qobuz, Tidal or Deezer**, with the service's own artwork.
 
 Tested on LMS 9.x with the **Material Skin** (the classic skin works for the basics).
 
@@ -11,6 +11,7 @@ Tested on LMS 9.x with the **Material Skin** (the classic skin works for the bas
 | Feature | What it gives you | Needs |
 |---|---|---|
 | **Best New Music** | Pitchfork's curated Best New Music picks as a browsable list | Nothing |
+| **High Scoring Albums** | Pitchfork's curated high-scoring picks as a second browsable list | Nothing |
 | **Latest Reviews** | The most recent album reviews, grouped by date or genre | Nothing |
 | **Group by date or genre** | Divide Latest Reviews by Pitchfork genre (default) or into weekly date sections | Nothing |
 | **One-tap playback** | A matched review plays straight from your streaming service — no searching | A streaming plugin |
@@ -18,7 +19,7 @@ Tested on LMS 9.x with the **Material Skin** (the classic skin works for the bas
 | **Genres** | Each review shows its Pitchfork genre(s) on the row and detail page | Nothing |
 | **Read the full review** | Links out to Pitchfork; the plugin shows only artist, album, date, genre and the short capsule | Nothing |
 | **Grid or list view** | Every row carries artwork, so Material's thumbnail/grid toggle stays available | Material Skin |
-| **Material home shelves** | Best New Music and Latest Reviews as scrollable rows on the Material home page | Material Skin |
+| **Material home shelves** | Best New Music, High Scoring Albums and Latest Reviews as scrollable rows on the Material home page | Material Skin |
 | **Add to Listen Later** | Matched albums carry the data the *Listen Later* plugin needs to save & replay them | Listen Later plugin |
 | **Refresh** | A row at the top of each list re-fetches the feed and re-matches on demand | Nothing |
 | **Choose your services** | Set the search order for Qobuz / Tidal / Deezer (or turn one off) | Nothing |
@@ -59,7 +60,7 @@ sudo systemctl restart lyrionmusicserver
 ## Quick start
 
 1. Open **Apps → Pitchfork Reviews**.
-2. Choose **Best New Music** or **Latest Reviews**.
+2. Choose **Best New Music**, **High Scoring Albums** or **Latest Reviews**.
 3. Tap a matched album to play it, or open a row to read the capsule and follow **Read the full review**.
 4. Use the thumbnail/grid toggle to switch between list and cover views.
 
@@ -67,10 +68,10 @@ sudo systemctl restart lyrionmusicserver
 
 ## Using it
 
-### Best New Music & Latest Reviews
-The top menu has two feeds. **Best New Music** is Pitchfork's curated pick list. **Latest Reviews** is the most recent reviews, grouped by **genre** (the default) or by **date** — see below. Both are refreshed through the day and cached, so they open quickly.
+### Best New Music, High Scoring Albums & Latest Reviews
+The top menu has three feeds. **Best New Music** is Pitchfork's curated pick list, and **High Scoring Albums** is Pitchfork's companion list of its highest-rated recent records — both flat, curated lists. **Latest Reviews** is the most recent reviews, grouped by **genre** (the default) or by **date** — see below. All are refreshed through the day and cached, so they open quickly.
 
-You can switch how **Latest Reviews** is divided in **Plugin Settings → Group Latest Reviews by**: **Genre** (the default) groups reviews under their Pitchfork genre — newest first within each genre, with the genre carrying the most recent review at the top; **Date** instead keeps weekly headers (newest first). Either way the dividers carry the Pitchfork mark, and **Best New Music** stays a flat curated list.
+You can switch how **Latest Reviews** is divided in **Plugin Settings → Group Latest Reviews by**: **Genre** (the default) groups reviews under their Pitchfork genre — newest first within each genre, with the genre carrying the most recent review at the top; **Date** instead keeps weekly headers (newest first). Either way the dividers carry the Pitchfork mark, while **Best New Music** and **High Scoring Albums** stay flat curated lists.
 
 ### Playing a review
 When a review is opened, the plugin searches your enabled streaming services for the album and, on a match, turns the row into a **directly-playable album** with the **service's own artwork** — so you can play it or add it to the queue without searching. Unmatched reviews keep their Pitchfork cover and open a detail page with the capsule and a **Read the full review** link.
@@ -85,7 +86,7 @@ A **Refresh** row sits at the top of each feed. It re-fetches the latest reviews
 Under **Plugin Settings** you set a search **priority** for Qobuz, Tidal and Deezer (lower number = searched first; **0 = never use it**). The matcher stops at the first service that has the album, so ordering lets you prefer, say, Qobuz over Tidal.
 
 ### Material home shelves
-With the **Material Skin**, two scrollable rows — **Pitchfork: Best New Music** and **Pitchfork: Latest Reviews** — appear on your home page, so a matched album is a tap away without opening the app. Tap **show all** on a row to open the full list. (The home rows are a flat, playable card list — the genre/week dividers live in the in-app **Latest Reviews** view.) The plugin pre-warms the matches in the background so the shelves open instantly rather than pausing to resolve. The shelves appear automatically when Material Skin is installed; no setup needed.
+With the **Material Skin**, three scrollable rows — **Pitchfork: Best New Music**, **Pitchfork: High Scoring Albums** and **Pitchfork: Latest Reviews** — appear on your home page, so a matched album is a tap away without opening the app. Tap **show all** on a row to open the full list. (The home rows are a flat, playable card list — the genre/week dividers live in the in-app **Latest Reviews** view.) The plugin pre-warms the matches in the background so the shelves open instantly rather than pausing to resolve. The shelves appear automatically when Material Skin is installed; no setup needed.
 
 ---
 

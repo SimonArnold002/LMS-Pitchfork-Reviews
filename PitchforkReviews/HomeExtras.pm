@@ -1,10 +1,11 @@
 package Plugins::PitchforkReviews::HomeExtras;
 
-# Material Skin home-page scrollable rows. Two shelves, each its own
+# Material Skin home-page scrollable rows. Three shelves, each its own
 # HomeExtraBase subclass (own tag -> own CLI dispatch -> own feed; separate
 # packages avoid any shared per-class feed state):
-#   - Best New Music  (PFRBnm     -> Browse::homeBnm)
-#   - Latest Reviews  (PFRReviews -> Browse::homeReviews)
+#   - Best New Music       (PFRBnm     -> Browse::homeBnm)
+#   - High Scoring Albums  (PFRHsa     -> Browse::homeHsa)
+#   - Latest Reviews       (PFRReviews -> Browse::homeReviews)
 # Each feed returns a FLAT card list that does not vary by request quantity, so
 # deep home-shelf playback resolves the right item (see Browse::homeReviews for
 # the item_id / quantity-stability rule).
@@ -31,13 +32,40 @@ sub initPlugin {
         extra => { title => 'PLUGIN_PITCHFORKREVIEWS_HOME_BNM', icon => ICON, needsPlayer => 0 },
     );
 
-    # Latest Reviews (own package, below)
+    # High Scoring Albums + Latest Reviews (own packages, below)
+    Plugins::PitchforkReviews::HomeHsa->initPlugin();
     Plugins::PitchforkReviews::HomeReviews->initPlugin();
 }
 
 sub feed {
     my ($client, $cb, $args) = @_;
     Plugins::PitchforkReviews::Browse::homeBnm($client, $cb, $args);
+}
+
+
+package Plugins::PitchforkReviews::HomeHsa;
+
+use strict;
+use base qw(Plugins::MaterialSkin::HomeExtraBase);
+
+use Plugins::PitchforkReviews::Browse;
+
+sub initPlugin {
+    my ($class) = @_;
+    $class->SUPER::initPlugin(
+        feed  => \&feed,
+        tag   => 'PFRHsa',
+        extra => {
+            title       => 'PLUGIN_PITCHFORKREVIEWS_HOME_HSA',
+            icon        => Plugins::PitchforkReviews::HomeExtras::ICON,
+            needsPlayer => 0,
+        },
+    );
+}
+
+sub feed {
+    my ($client, $cb, $args) = @_;
+    Plugins::PitchforkReviews::Browse::homeHsa($client, $cb, $args);
 }
 
 

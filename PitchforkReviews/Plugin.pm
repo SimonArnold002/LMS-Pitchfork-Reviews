@@ -55,10 +55,6 @@ $prefs->init({
     # for now so a fresh install shows the genre grouping without a settings visit.
     group_by => 'genre',
 
-    # Latest Reviews grouping: 'date' (weekly dividers) or 'genre'. Default 'genre'
-    # for now so a fresh install shows the genre grouping without a settings visit.
-    group_by => 'genre',
-
     # Opt-in extra logging (also always mirrored to server.log at INFO).
     debug_log => 0,
 });
@@ -102,7 +98,7 @@ sub postinitPlugin {
         eval {
             require Plugins::PitchforkReviews::HomeExtras;
             Plugins::PitchforkReviews::HomeExtras->initPlugin();
-            $log->info("Registered Material Skin home extras (Best New Music + Latest Reviews)");
+            $log->info("Registered Material Skin home extras (Best New Music + High Scoring Albums + Latest Reviews)");
             1;
         } or $log->error("Failed to register Material home extras: $@");
     }

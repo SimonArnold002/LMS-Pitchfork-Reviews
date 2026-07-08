@@ -11,9 +11,10 @@ package Plugins::PitchforkReviews::API;
 # (so no mojibake). Only metadata + the short capsule is stored; the full review
 # is linked out, never reproduced.
 #
-# Two sources, same parser:
+# Three sources, same parser:
 #   getListing() -> the album-reviews page (all recent reviews, capped)
 #   getBnm()     -> the Best New Music page (its items ARE the BNM picks)
+#   getHsa()     -> the High Scoring Albums page (its items ARE the picks)
 
 use strict;
 
@@ -38,12 +39,14 @@ use constant UA => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
 use constant SITE        => 'https://pitchfork.com';
 use constant REVIEWS_URL => 'https://pitchfork.com/reviews/albums/';
 use constant BNM_URL     => 'https://pitchfork.com/reviews/best/albums/';
+use constant HSA_URL     => 'https://pitchfork.com/reviews/best/high-scoring-albums/';
 
 # getListing($cb, force => 0|1) / getBnm($cb, force => 0|1)
 # Each calls back with an arrayref of normalised items (newest-first):
 #   { artist, album, title, capsule, link, date, cover, score, genre, is_bnm }
 sub getListing { my ($cb, %o) = @_; _fetchState(REVIEWS_URL, 'pfr:listing:3', REVIEWS_MAX, $cb, %o); }
 sub getBnm     { my ($cb, %o) = @_; _fetchState(BNM_URL,     'pfr:bnm:3',     0,           $cb, %o); }
+sub getHsa     { my ($cb, %o) = @_; _fetchState(HSA_URL,     'pfr:hsa:3',     0,           $cb, %o); }
 
 sub _fetchState {
     my ($url, $key, $cap, $cb, %opts) = @_;
