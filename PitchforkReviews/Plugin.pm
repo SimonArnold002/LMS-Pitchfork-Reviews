@@ -17,9 +17,20 @@ use base qw(Slim::Plugin::OPMLBased);
 
 use Slim::Utils::Log;
 use Slim::Utils::Prefs;
+use Slim::Utils::PluginManager;
 use Slim::Utils::Strings qw(string cstring);
 use Slim::Utils::OSDetect;
+use Slim::Utils::Timers;
+use Slim::Music::Import;
 use File::Spec;
+
+# Background warm cadence. Staggered later than the sibling ListenBrainz plugin's
+# 60s warm so, when both are installed, they don't hit the streaming APIs at boot
+# together. The daily tick is cheap — resolver matches are cached, so it only does
+# real work for reviews new since the last run.
+use constant WARM_DELAY      => 150;         # seconds after startup
+use constant WARM_INTERVAL   => 24 * 3600;   # daily
+use constant WARM_SCAN_RETRY => 120;         # seconds between library-scan re-checks
 
 my $log = Slim::Utils::Log->addLogCategory({
     'category'     => 'plugin.pitchforkreviews',
@@ -40,8 +51,9 @@ $prefs->init({
     svc_priority_tidal  => 2,
     svc_priority_deezer => 3,
 
-    # Hide reviews that didn't resolve to a playable streaming album (off = show all).
-    hide_unmatched => 0,
+    # Latest Reviews grouping: 'date' (weekly dividers) or 'genre'. Default 'genre'
+    # for now so a fresh install shows the genre grouping without a settings visit.
+    group_by => 'genre',
 
     # Latest Reviews grouping: 'date' (weekly dividers) or 'genre'. Default 'genre'
     # for now so a fresh install shows the genre grouping without a settings visit.
@@ -76,6 +88,51 @@ sub initPlugin {
     );
 
     return;
+}
+
+# Runs after all plugins have initialised, so Material Skin is available to
+# check. Registers the home-page shelves (Best New Music + Latest Reviews),
+# mirroring how the ListenBrainz plugin / Qobuz / Bandcamp do it. A quiet no-op
+# when Material Skin isn't installed or is too old to expose registerHomeExtra.
+sub postinitPlugin {
+    my $class = shift;
+
+    if ( Slim::Utils::PluginManager->isEnabled('Plugins::MaterialSkin::Plugin')
+      && Plugins::MaterialSkin::Plugin->can('registerHomeExtra') ) {
+        eval {
+            require Plugins::PitchforkReviews::HomeExtras;
+            Plugins::PitchforkReviews::HomeExtras->initPlugin();
+            $log->info("Registered Material Skin home extras (Best New Music + Latest Reviews)");
+            1;
+        } or $log->error("Failed to register Material home extras: $@");
+    }
+
+    # Pre-resolve the two listings to streaming shortly after startup, then daily,
+    # so the home shelves (and browse lists) open from a warm cache instead of
+    # running an up-to-18s resolve live on the Material home carousel. Delayed so
+    # it doesn't compete with boot; the whole build benefits (not just Material).
+    Slim::Utils::Timers::setTimer(undef, time() + WARM_DELAY, \&_warmTick);
+
+    return;
+}
+
+# Run the warm, then re-arm for the next day. Deferred while a library scan is in
+# progress so a match never resolves against a half-scanned library (mirrors the
+# sibling ListenBrainz plugin's warm).
+sub _warmTick {
+    if ( Slim::Music::Import->stillScanning() ) {
+        dbg("warm: library scan in progress — deferring " . WARM_SCAN_RETRY . "s");
+        Slim::Utils::Timers::setTimer(undef, time() + WARM_SCAN_RETRY, \&_warmTick);
+        return;
+    }
+
+    eval {
+        require Plugins::PitchforkReviews::Browse;
+        Plugins::PitchforkReviews::Browse::warmCache();
+        1;
+    } or $log->error("Home-shelf warm failed: $@");
+
+    Slim::Utils::Timers::setTimer(undef, time() + WARM_INTERVAL, \&_warmTick);
 }
 
 # ---------------------------------------------------------------------------

@@ -116,7 +116,7 @@
   <h1>Pitchfork Reviews — for Lyrion Music Server</h1>
   <p class="tagline">Browse curated album reviews inside <strong>Lyrion Music Server (LMS)</strong> and play the reviewed album straight from your <strong>streaming library</strong> — one tap to play or add to the queue. Reviews come from <strong>Pitchfork</strong> (Best New Music + Latest Reviews); each one is matched to a directly-playable album on <strong>Qobuz, Tidal or Deezer</strong>, with the service's own artwork.</p>
   <div class="badges">
-    <span class="badge accent">v0.5.3</span>
+    <span class="badge accent">v0.6.1</span>
     <span class="badge">LMS 9.0.0+</span>
     <span class="badge">Material Skin</span>
     <span class="badge">Qobuz · Tidal · Deezer</span>
@@ -136,10 +136,10 @@
 <div class="card"><h4>Group by date or genre</h4><p>Divide Latest Reviews by Pitchfork genre (default) or into weekly date sections</p><span class="needs">Needs: nothing</span></div>
 <div class="card"><h4>One-tap playback</h4><p>A matched review plays straight from your streaming service — no searching</p><span class="needs">Needs: A streaming plugin</span></div>
 <div class="card"><h4>Real album artwork</h4><p>Matched rows swap the Pitchfork thumbnail for the service's own cover</p><span class="needs">Needs: A streaming plugin</span></div>
-<div class="card"><h4>Hide non-playable reviews</h4><p>Optionally hide reviews with no streaming match, so the whole list is one-tap playable</p><span class="needs">Needs: A streaming plugin</span></div>
 <div class="card"><h4>Genres</h4><p>Each review shows its Pitchfork genre(s) on the row and detail page</p><span class="needs">Needs: nothing</span></div>
 <div class="card"><h4>Read the full review</h4><p>Links out to Pitchfork; the plugin shows only artist, album, date, genre and the short capsule</p><span class="needs">Needs: nothing</span></div>
 <div class="card"><h4>Grid or list view</h4><p>Every row carries artwork, so Material's thumbnail/grid toggle stays available</p><span class="needs">Needs: Material Skin</span></div>
+<div class="card"><h4>Material home shelves</h4><p>Best New Music and Latest Reviews as scrollable rows on the Material home page</p><span class="needs">Needs: Material Skin</span></div>
 <div class="card"><h4>Add to Listen Later</h4><p>Matched albums carry the data the <em>Listen Later</em> plugin needs to save &amp; replay them</p><span class="needs">Needs: Listen Later plugin</span></div>
 <div class="card"><h4>Refresh</h4><p>A row at the top of each list re-fetches the feed and re-matches on demand</p><span class="needs">Needs: nothing</span></div>
 <div class="card"><h4>Choose your services</h4><p>Set the search order for Qobuz / Tidal / Deezer (or turn one off)</p><span class="needs">Needs: nothing</span></div>
@@ -186,14 +186,14 @@ sudo systemctl restart lyrionmusicserver</code></pre>
 <p>You can switch how <strong>Latest Reviews</strong> is divided in <strong>Plugin Settings → Group Latest Reviews by</strong>: <strong>Genre</strong> (the default) groups reviews under their Pitchfork genre — newest first within each genre, with the genre carrying the most recent review at the top; <strong>Date</strong> instead keeps weekly headers (newest first). Either way the dividers carry the Pitchfork mark, and <strong>Best New Music</strong> stays a flat curated list.</p>
 <h3>Playing a review</h3>
 <p>When a review is opened, the plugin searches your enabled streaming services for the album and, on a match, turns the row into a <strong>directly-playable album</strong> with the <strong>service's own artwork</strong> — so you can play it or add it to the queue without searching. Unmatched reviews keep their Pitchfork cover and open a detail page with the capsule and a <strong>Read the full review</strong> link.</p>
-<h3>Hide non-playable reviews</h3>
-<p>By default every review shows — matched ones are one-tap playable, unmatched ones keep their Pitchfork cover and link out to the review. If you'd rather see only what you can play, turn on <strong>Plugin Settings → Hide non-playable reviews</strong> and the list shows only reviews that matched a streaming album on one of your services.</p>
 <h3>Genres</h3>
 <p>Each review carries its Pitchfork genre(s) — shown on the row's second line (next to the date) and on the detail page.</p>
 <h3>Refresh</h3>
 <p>A <strong>Refresh</strong> row sits at the top of each feed. It re-fetches the latest reviews and re-runs the streaming match — handy if an album has only just appeared on a service, or a match was missed.</p>
 <h3>Choosing services</h3>
 <p>Under <strong>Plugin Settings</strong> you set a search <strong>priority</strong> for Qobuz, Tidal and Deezer (lower number = searched first; <strong>0 = never use it</strong>). The matcher stops at the first service that has the album, so ordering lets you prefer, say, Qobuz over Tidal.</p>
+<h3>Material home shelves</h3>
+<p>With the <strong>Material Skin</strong>, two scrollable rows — <strong>Pitchfork: Best New Music</strong> and <strong>Pitchfork: Latest Reviews</strong> — appear on your home page, so a matched album is a tap away without opening the app. Tap <strong>show all</strong> on a row to open the full list. (The home rows are a flat, playable card list — the genre/week dividers live in the in-app <strong>Latest Reviews</strong> view.) The plugin pre-warms the matches in the background so the shelves open instantly rather than pausing to resolve. The shelves appear automatically when Material Skin is installed; no setup needed.</p>
 </section>
 <section id="settings-reference">
 <h2>Settings reference</h2>
@@ -209,7 +209,6 @@ sudo systemctl restart lyrionmusicserver</code></pre>
 <tr><td><strong>Tidal search priority</strong></td><td>Order Tidal is searched in (0 = never)</td><td>2</td></tr>
 <tr><td><strong>Deezer search priority</strong></td><td>Order Deezer is searched in (0 = never)</td><td>3</td></tr>
 <tr><td><strong>Group Latest Reviews by</strong></td><td>Divide Latest Reviews by Pitchfork genre or by date (weekly headers)</td><td>Genre</td></tr>
-<tr><td><strong>Hide non-playable reviews</strong></td><td>Only show reviews that matched a streaming album on one of your services</td><td>Off</td></tr>
 <tr><td><strong>Extra debug logging</strong></td><td>Logs feed fetches and match decisions to the server log while diagnosing</td><td>Off</td></tr>
 </tbody></table>
 </section>

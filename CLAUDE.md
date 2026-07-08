@@ -11,6 +11,40 @@ Fresh Releases** plugin. Pure Perl, async, **no extra server software**
 
 Design decisions live in the auto-memory note `album-reviews-plugin-scope`.
 
+## Feature Summary & Release Posts (social media)
+
+**Maintain this section** (same convention as the sibling ListenBrainz / Listen Later plugins). Two living artefacts for announcing the plugin:
+1. **Overall feature summary** (below) — the social-media / GitHub Pages "drop page" copy. **Update it whenever a key feature is added, changed or removed** (not for bug fixes). Key-features-only, user-facing, no internals.
+2. **Per-release post** — when cutting a release, generate a short social post: lead with new **features**, then a short "Fixes & polish" line for notable bug fixes. Install line is the Pages repo URL. Hashtags: `#LyrionMusicServer #Pitchfork #Squeezebox #SelfHosted`.
+
+### Overall feature summary (keep current)
+
+> **Pitchfork Reviews — for Lyrion Music Server.** Browse Pitchfork's album reviews inside LMS and play the reviewed album straight from your streaming library — one tap, no searching.
+
+- **Best New Music** — Pitchfork's curated Best New Music picks as a browsable, playable list.
+- **Latest Reviews** — the most recent album reviews, grouped by **genre** (default) or by **week**; dividers carry the Pitchfork mark.
+- **One-tap playback** — each review is matched to a directly-playable album on **Qobuz / Tidal / Deezer**, shown with the service's own artwork; play it or queue it without searching.
+- **Genres on every row** — each review shows its Pitchfork genre(s) on the row and the detail page.
+- **Read the full review** — links out to Pitchfork; the plugin keeps only artist, album, date, genre and the short capsule (never reproduces the review).
+- **Grid or list** — every row carries artwork, so Material's thumbnail/grid toggle stays available.
+- **Choose your services** — set the Qobuz / Tidal / Deezer search order (or turn one off).
+- **Material home shelves** — Best New Music and Latest Reviews as scrollable rows on the Material home page.
+- **Add to Listen Later** — matched albums carry what the companion *Listen Later* plugin needs to save & replay them.
+- **Smart matching** — folds stylised spellings (*WOR$T* = *Worst*, *P!nk* = *Pink*) and a trailing EP/LP so more reviews resolve to a playable album.
+
+**Requirements:** LMS 9.0.0+ (Material Skin recommended; the classic skin covers browse/play). For playback, at least one of **Qobuz / Tidal / Deezer** installed and signed in. **Pure Perl, cached, no extra server software** — runs the same on a Raspberry Pi or a NAS. Every streaming integration is optional and degrades gracefully.
+
+**Install:** add `https://simonarnold002.github.io/LMS-Pitchfork-Reviews/repo.xml` in LMS → Settings → Plugins.
+
+### Latest per-release post (0.6.1)
+
+> **Pitchfork Reviews 0.6.1 — for Lyrion Music Server** 🎵
+> **New: Material home shelves** — Best New Music and Latest Reviews now appear as scrollable rows right on your Material home page, playable in a tap.
+> Plus (0.5.x): **Latest Reviews grouped by genre** (the new default) as well as by week — reviews under their Pitchfork genre, newest first, with branded Pitchfork dividers.
+> _Fixes & polish:_ home shelves now pre-warm in the background so they open instantly instead of pausing to resolve; the shelves always show the full flat list for reliable one-tap playback; genre names with a slash (Pop/R&B, Folk/Country) group and label correctly.
+> Install: `https://simonarnold002.github.io/LMS-Pitchfork-Reviews/repo.xml`
+> #LyrionMusicServer #Pitchfork #Squeezebox #SelfHosted
+
 ## Naming
 Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 (`Plugins::PitchforkReviews::*`); prefs `plugin.pitchforkreviews`; command tag
@@ -18,16 +52,14 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with two feed tiles "Best New Music" + "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: 0.5.3
+## Status: 0.6.1
 Working end to end (page-state parse, streaming resolve to Qobuz/Tidal/Deezer,
 genres, week/genre dividers, grid view, ListenLater favurl handshake, branded section
 tiles + Settings cog, "Read the full review" reachable on matched rows too,
-optional "hide non-playable reviews" filter). Settings: `svc_priority_*`
+Material home shelves with a background warm). Settings: `svc_priority_*`
 (rendered dynamically from `Browse::serviceStatus` — each service shown
 installed/not-installed with its priority input, ported from LBF),
-`hide_unmatched` (default 0 — when on, `_visibleItems` keeps only rows with a
-resolved `_album`; a still-resolving item at the render deadline is hidden until
-the warm fills the cache), `group_by` (0.5.0: `'genre'` = `_genreRows` groups by
+`group_by` (0.5.0: `'genre'` = `_genreRows` groups by
 PRIMARY Pitchfork genre, or `'date'` = weekly dividers via `_weeklyRows` —
 `_groupedRows` dispatches; genres ordered newest-review-first, newest-first within
 each; both modes share `_divHeader`, whose divider icon is the Pitchfork
@@ -67,7 +99,8 @@ EVERY zip rebuild: bump the version (install.xml + repo.xml) AND recompute the s
 PitchforkReviews/
 ├── Plugin.pm    # OPMLBased entry point; prefs; log category
 ├── API.pm       # Async Pitchfork page-state (Verso __PRELOADED_STATE__) fetch + parse + caching
-├── Browse.pm    # Browse feeds (top level, per-source feed, review detail) + the album streaming resolver
+├── Browse.pm    # Browse feeds (top level, per-source feed, review detail) + the album streaming resolver + home-shelf feeds (homeBnm/homeReviews)
+├── HomeExtras.pm # Material Skin home-page shelves (0.6.0): PFRBnm + PFRReviews HomeExtraBase subclasses
 ├── Settings.pm  # Streaming-service priorities + debug-log toggle
 ├── strings.txt  # EN strings
 ├── install.xml  # <extension> (singular — manual-install format)
@@ -103,6 +136,30 @@ repo.xml         # <extensions> (plural — repo-install manifest)
   resolves every item to streaming **during the build**
   (`_resolveSection`, bounded concurrency 6, 18s render deadline then partial +
   background cache-warm). All dynamic feeds return `cachetime => 0`.
+- **Home shelves** (`HomeExtras.pm` + `Browse::homeBnm`/`homeReviews`, 0.6.0;
+  hardened 0.6.1): registered in `Plugin::postinitPlugin` (guarded on MaterialSkin +
+  `->can('registerHomeExtra')`, quiet no-op otherwise), two `HomeExtraBase`
+  subclasses `PFRBnm`/`PFRReviews`. **Critical rule (ported from LBF's 0.6.11
+  lesson):** a home-shelf feed MUST be a FLAT card list — NO Refresh row, NO
+  week/genre dividers — and must NOT vary by request quantity. Material uses the
+  same feed for the carousel and its "show all" click-in and re-traverses by
+  `item_id` at quantity 1 for playback; a header at index 0 (or any change in the
+  set of rows) shifts every card's `item_id` and breaks deep streaming playback.
+  So the home feeds map `_reviewRow` over the WHOLE flat list — every review,
+  matched or not (never `_groupedRows`/`_refreshRow`). **0.6.1 removed the
+  `hide_unmatched` filter entirely** (and its `_visibleItems` helper): filtering to
+  matched-only made list membership vary as the resolver cache filled, so the
+  carousel render and the play re-traversal saw different item_ids — the exact
+  0.6.11 failure. **Background warm (0.6.1, `Browse::warmCache`):** the per-item
+  resolve is pre-warmed by `Plugin::postinitPlugin`'s warm (`WARM_DELAY` 150s after
+  boot — staggered past LBF's 60s — then daily via `_warmTick`, deferred while
+  `Slim::Music::Import->stillScanning`), so on a warm cache the home build is all
+  cache hits and returns immediately instead of making Material wait out an 18s live
+  resolve (which it can time out on → empty/hung shelf, the reason LBF never
+  resolves inside its home feeds). `warmCache` resolves getListing then getBnm
+  sequentially via `_resolveSection`, using the first connected player for the
+  streaming API context (a no-op with no player). Cold cache still resolves during
+  the build (degrades to the browse-list behaviour).
 - **Rows** (`_reviewRow`): a MATCHED item renders as the streaming album node —
   **playable from the list, with the service's album artwork** — relabelled to the
   review "Artist - Album" + capsule (override `line1`/`line2`/`name`: Material
@@ -193,8 +250,8 @@ but the form Listen Later replays cleanly is the explicit one below.)
   scrape per album for the star rating + capsule. Heaviest source — cache hard,
   low request rate, isolate the HTML selectors in one place. Same UA constant as
   `API.pm`. Reuse the exact same resolver (artist/album → playable).
-- Later polish (from the sibling plugin's playbook): Material home shelf, a
-  background warm to pre-resolve, richer detail page.
+- Later polish (from the sibling plugin's playbook): ~~Material home shelf~~ (done,
+  0.6.0), ~~a background warm to pre-resolve~~ (done, 0.6.1), richer detail page.
 
 ## Conventions (shared with the plugin fleet)
 - `<extension>` (singular) in install.xml for manual installs; `<extensions>`
