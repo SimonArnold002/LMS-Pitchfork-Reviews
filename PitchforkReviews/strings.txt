@@ -55,6 +55,21 @@ PLUGIN_PITCHFORKREVIEWS_SVC_DETECTED
 PLUGIN_PITCHFORKREVIEWS_SVC_NOT_DETECTED
 	EN	not installed
 
+PLUGIN_PITCHFORKREVIEWS_GROUP_BY
+	EN	Group Latest Reviews by
+
+PLUGIN_PITCHFORKREVIEWS_GROUP_BY_DESC
+	EN	How the Latest Reviews list is divided. By date keeps the weekly dividers (newest first). By genre groups reviews under their Pitchfork genre — newest first within each genre, and the genre with the most recent review leads. (Best New Music stays a flat curated list.)
+
+PLUGIN_PITCHFORKREVIEWS_GROUP_BY_DATE
+	EN	Date (weekly)
+
+PLUGIN_PITCHFORKREVIEWS_GROUP_BY_GENRE
+	EN	Genre
+
+PLUGIN_PITCHFORKREVIEWS_GENRE_OTHER
+	EN	Other
+
 PLUGIN_PITCHFORKREVIEWS_HIDE_UNMATCHED
 	EN	Hide non-playable reviews
 

@@ -43,6 +43,10 @@ $prefs->init({
     # Hide reviews that didn't resolve to a playable streaming album (off = show all).
     hide_unmatched => 0,
 
+    # Latest Reviews grouping: 'date' (weekly dividers) or 'genre'. Default 'genre'
+    # for now so a fresh install shows the genre grouping without a settings visit.
+    group_by => 'genre',
+
     # Opt-in extra logging (also always mirrored to server.log at INFO).
     debug_log => 0,
 });

@@ -21,6 +21,11 @@
 <div class="prefHead collapsableSection" id="pfr_general_Header">[% "PLUGIN_PITCHFORKREVIEWS_GENERAL" | string %]</div>
 <div id="pfr_general">
 
+	[% WRAPPER setting title="PLUGIN_PITCHFORKREVIEWS_GROUP_BY" desc="PLUGIN_PITCHFORKREVIEWS_GROUP_BY_DESC" %]
+		<div style="margin:4px 0;"><label><input type="radio" name="pref_group_by" value="date" [% IF prefs.group_by == 'date' %]checked="checked"[% END %] /> [% 'PLUGIN_PITCHFORKREVIEWS_GROUP_BY_DATE' | string %]</label></div>
+		<div style="margin:4px 0;"><label><input type="radio" name="pref_group_by" value="genre" [% IF prefs.group_by == 'genre' %]checked="checked"[% END %] /> [% 'PLUGIN_PITCHFORKREVIEWS_GROUP_BY_GENRE' | string %]</label></div>
+	[% END %]
+
 	[% WRAPPER setting title="PLUGIN_PITCHFORKREVIEWS_HIDE_UNMATCHED" desc="PLUGIN_PITCHFORKREVIEWS_HIDE_UNMATCHED_DESC" %]
 		<input type="checkbox" name="pref_hide_unmatched" value="1" [% IF prefs.hide_unmatched %]checked="checked"[% END %] />
 	[% END %]
