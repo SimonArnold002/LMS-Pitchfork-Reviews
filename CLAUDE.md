@@ -18,16 +18,39 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with two feed tiles "Best New Music" + "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: 0.4.5
+## Status: 0.5.3
 Working end to end (page-state parse, streaming resolve to Qobuz/Tidal/Deezer,
-genres, week dividers, grid view, ListenLater favurl handshake, branded section
+genres, week/genre dividers, grid view, ListenLater favurl handshake, branded section
 tiles + Settings cog, "Read the full review" reachable on matched rows too,
 optional "hide non-playable reviews" filter). Settings: `svc_priority_*`
 (rendered dynamically from `Browse::serviceStatus` — each service shown
 installed/not-installed with its priority input, ported from LBF),
 `hide_unmatched` (default 0 — when on, `_visibleItems` keeps only rows with a
 resolved `_album`; a still-resolving item at the render deadline is hidden until
-the warm fills the cache), `debug_log` (0.4.4: now actually wired — `Plugin::dbg`
+the warm fills the cache), `group_by` (0.5.0: `'genre'` = `_genreRows` groups by
+PRIMARY Pitchfork genre, or `'date'` = weekly dividers via `_weeklyRows` —
+`_groupedRows` dispatches; genres ordered newest-review-first, newest-first within
+each; both modes share `_divHeader`, whose divider icon is the Pitchfork
+`HEADER_ICON`; Latest Reviews only — BNM stays flat.
+**Genre-split fix (0.5.3):** `_genreKey` splits the display `genre` on the ` / ` JOIN
+delimiter only — `m{\s+/\s+}`, spaces REQUIRED — because Pitchfork's own genre NAMES
+contain a bare slash (`Pop/R&B`, `Folk/Country`). The old `m{\s*/\s*}` split inside
+those names, so "Pop/R&B" bucketed/labelled as "Pop" and "Folk/Country" as "Folk".
+**Divider-icon gotcha (0.5.2):** Material renders an icon on a `header`/`header-basic`
+divider ONLY when the `image` is the **`_svg.png`** Material-recolour form (or an
+`_MTL_*` icon) — a plain `.png` is IGNORED on a header (it's drawn on normal rows but
+not headers). 0.5.0/0.5.1 used the plain `PitchforkReviewsIcon.png` on the divider, so
+the logo never showed; 0.5.2 uses `HEADER_ICON` = `PitchforkReviewsIcon_svg.png` (theme-
+recoloured, `#000`-based SVG), matching LBF whose dividers use its `…Icon_svg.png`.
+`LOGO_ICON` (the full-colour raster) stays on the "Read the full review" row (a normal
+row, where a plain png renders fine).
+Settings uses **radio buttons** not a `<select>` — Material doesn't always render a
+dropdown right. **Default is `'genre'`** (confirmed shipping default, user decision
+2026-07-08) so a fresh install shows genre grouping; NB `prefs->init` won't overwrite an
+existing pref, so an install that already saved `group_by` keeps its value. Grouping is
+read live per render (`_groupedRows`) and the feed is `cachetime => 0`, so a settings
+change shows on the next re-open of the list — no restart, no cache wait),
+`debug_log` (0.4.4: now actually wired — `Plugin::dbg`
 mirrors the resolve timeline to server.log at INFO always, and to a size-capped
 `pfr-debug.log` when on; `Browse::_dbg` is the alias, ported from LBF). **Icon:** the
 Pitchfork round mark, generated to spec — `PitchforkReviewsIcon.svg` (geometric
@@ -74,8 +97,10 @@ repo.xml         # <extensions> (plural — repo-install manifest)
   `_MTL_icon_settings` convention, same as LBF). The list row's `line2` separator is a
   middle dot via a **double-quoted** `"\x{b7}"` — a single-quoted `'\x{b7}'` prints the
   literal escape (the 0.4.0 "odd text before the genre" fix).
-  Reviews are week-divided (Material headers, `pubDate` grouped); BNM is a flat
-  curated list. Each list open resolves every item to streaming **during the build**
+  Reviews are divided by Material headers — by week (`pubDate` grouped, default) or
+  by **genre** (`group_by` pref → `_genreRows`, primary Pitchfork genre); BNM is a flat
+  curated list. Divider headers now carry the Pitchfork `LOGO_ICON`. Each list open
+  resolves every item to streaming **during the build**
   (`_resolveSection`, bounded concurrency 6, 18s render deadline then partial +
   background cache-warm). All dynamic feeds return `cachetime => 0`.
 - **Rows** (`_reviewRow`): a MATCHED item renders as the streaming album node —

@@ -50,7 +50,8 @@ use constant REFRESH_ICON    => 'plugins/PitchforkReviews/html/images/pfr-refres
 use constant SETTINGS_ICON   => 'plugins/PitchforkReviews/html/images/pfr-cog_MTL_icon_settings.png';     # Material cog font-icon (like LBF)
 use constant BNM_TILE        => 'plugins/PitchforkReviews/html/images/menu-best-new-music.png';           # branded section cover
 use constant REVIEWS_TILE    => 'plugins/PitchforkReviews/html/images/menu-latest-reviews.png';           # branded section cover
-use constant LOGO_ICON       => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIcon.png';          # Pitchfork round mark — marks the "Read the full review" link
+use constant LOGO_ICON       => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIcon.png';          # Pitchfork round mark (full-colour raster) — marks the "Read the full review" link
+use constant HEADER_ICON     => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIcon_svg.png';      # divider/header icon — MUST be the `_svg.png` Material-recolour form: Material renders an icon on a header-basic divider ONLY for `_svg.png`/`_MTL_*` icons, NOT a plain .png (verified vs LBF, whose dividers use its _svg.png)
 
 # ===========================================================================
 # Browse feeds
@@ -113,7 +114,7 @@ sub fetchFeed {
             my $vis  = _visibleItems($items);
             my @rows = ( _refreshRow($client, 'reviews') );
             if (@$vis) {
-                push @rows, @{ _weeklyRows($client, $vis, $headers) };
+                push @rows, @{ _groupedRows($client, $vis, $headers) };
             }
             else {
                 push @rows, { name => cstring($client, 'PLUGIN_PITCHFORKREVIEWS_EMPTY'), type => 'text' };
@@ -417,6 +418,34 @@ sub _headerType {
     return $_headerTypeCache = $useBasic ? 'header-basic' : 'header';
 }
 
+# Dispatch the Latest Reviews list to a grouping mode (Settings -> group_by):
+# 'date' (default) keeps the weekly dividers; 'genre' groups under each Pitchfork
+# genre instead. Either way the feed items arrive newest-first (API sorts by date),
+# so date order is preserved within every bucket.
+sub _groupedRows {
+    my ($client, $items, $headers) = @_;
+    return _genreRows($client, $items, $headers)
+        if ($prefs->get('group_by') // 'date') eq 'genre';
+    return _weeklyRows($client, $items, $headers);
+}
+
+# Divider header shared by both grouping modes: the Pitchfork logo (not the neutral
+# record icon) so headers are branded, and still an image so Material keeps the grid
+# toggle enabled. On a header-capable client XMLBrowser forces a drill onto the older
+# 'header' type, so carry a url returning that bucket's rows (ignored by header-basic).
+sub _divHeader {
+    my ($client, $label, $divType, $headers, $rowsFor) = @_;
+    my $hdr = { name => $label, type => $divType, image => HEADER_ICON };
+    if ($headers) {
+        $hdr->{url} = sub {
+            my ($c, $cb) = @_;
+            $cb->({ items => [ map { _reviewRow($c, $_) } @$rowsFor ] });
+        };
+        $hdr->{passthrough} = [ {} ];
+    }
+    return $hdr;
+}
+
 # Group items into weeks, emitting a divider header + that week's review rows.
 sub _weeklyRows {
     my ($client, $items, $headers) = @_;
@@ -431,19 +460,53 @@ sub _weeklyRows {
 
     my @rows;
     for my $ws (@order) {
-        my $wk  = $bucket{$ws};
-        my $hdr = { name => _weekLabel($client, $ws), type => $divType, image => DIVIDER_ICON };
-        if ($headers) {
-            $hdr->{url} = sub {
-                my ($c, $cb) = @_;
-                $cb->({ items => [ map { _reviewRow($c, $_) } @$wk ] });
-            };
-            $hdr->{passthrough} = [ {} ];
-        }
-        push @rows, $hdr;
+        my $wk = $bucket{$ws};
+        push @rows, _divHeader($client, _weekLabel($client, $ws), $divType, $headers, $wk);
         push @rows, map { _reviewRow($client, $_) } @$wk;
     }
     return \@rows;
+}
+
+# Group items by their PRIMARY Pitchfork genre, emitting a genre divider + that
+# genre's rows. Genres appear in the order their newest review does (so the genre
+# with the most recent review leads), and rows within a genre stay newest-first —
+# the "in date order" the feed already provides.
+sub _genreRows {
+    my ($client, $items, $headers) = @_;
+    my $divType = $headers ? _headerType() : 'text';
+
+    my (@order, %bucket);
+    for my $it (@$items) {
+        my $g = _genreKey($it);
+        push @order, $g unless exists $bucket{$g};
+        push @{ $bucket{$g} }, $it;
+    }
+
+    my @rows;
+    for my $g (@order) {
+        my $grp = $bucket{$g};
+        push @rows, _divHeader($client, _genreLabel($client, $g), $divType, $headers, $grp);
+        push @rows, map { _reviewRow($client, $_) } @$grp;
+    }
+    return \@rows;
+}
+
+# Bucket key = the primary genre (Pitchfork's first rubric; the row's `genre` is the
+# list joined " / "). Split ONLY on that " / " join delimiter (spaces required) — a
+# bare "/" is part of a genre NAME (Pitchfork's "Pop/R&B", "Folk/Country") and must
+# not be split. Falls to '' when a review carries no genre.
+sub _genreKey {
+    my ($it) = @_;
+    my ($g) = split m{\s+/\s+}, ($it->{genre} // ''), 2;
+    $g //= '';
+    $g =~ s/^\s+//; $g =~ s/\s+$//;
+    return $g;
+}
+
+# Divider label for a genre bucket ('' -> "Other").
+sub _genreLabel {
+    my ($client, $g) = @_;
+    return length $g ? $g : cstring($client, 'PLUGIN_PITCHFORKREVIEWS_GENRE_OTHER');
 }
 
 # Monday (YYYY-MM-DD, UTC) of the week containing an RFC-822 pubDate

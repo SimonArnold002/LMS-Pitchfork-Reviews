@@ -11,9 +11,11 @@ Tested on LMS 9.x with the **Material Skin** (the classic skin works for the bas
 | Feature | What it gives you | Needs |
 |---|---|---|
 | **Best New Music** | Pitchfork's curated Best New Music picks as a browsable list | Nothing |
-| **Latest Reviews** | The most recent album reviews, grouped into weeks | Nothing |
+| **Latest Reviews** | The most recent album reviews, grouped by date or genre | Nothing |
+| **Group by date or genre** | Divide Latest Reviews by Pitchfork genre (default) or into weekly date sections | Nothing |
 | **One-tap playback** | A matched review plays straight from your streaming service — no searching | A streaming plugin |
 | **Real album artwork** | Matched rows swap the Pitchfork thumbnail for the service's own cover | A streaming plugin |
+| **Hide non-playable reviews** | Optionally hide reviews with no streaming match, so the whole list is one-tap playable | A streaming plugin |
 | **Genres** | Each review shows its Pitchfork genre(s) on the row and detail page | Nothing |
 | **Read the full review** | Links out to Pitchfork; the plugin shows only artist, album, date, genre and the short capsule | Nothing |
 | **Grid or list view** | Every row carries artwork, so Material's thumbnail/grid toggle stays available | Material Skin |
@@ -66,10 +68,15 @@ sudo systemctl restart lyrionmusicserver
 ## Using it
 
 ### Best New Music & Latest Reviews
-The top menu has two feeds. **Best New Music** is Pitchfork's curated pick list. **Latest Reviews** is the most recent reviews, split into **week headers** so you can see what landed each week. Both are refreshed through the day and cached, so they open quickly.
+The top menu has two feeds. **Best New Music** is Pitchfork's curated pick list. **Latest Reviews** is the most recent reviews, grouped by **genre** (the default) or by **date** — see below. Both are refreshed through the day and cached, so they open quickly.
+
+You can switch how **Latest Reviews** is divided in **Plugin Settings → Group Latest Reviews by**: **Genre** (the default) groups reviews under their Pitchfork genre — newest first within each genre, with the genre carrying the most recent review at the top; **Date** instead keeps weekly headers (newest first). Either way the dividers carry the Pitchfork mark, and **Best New Music** stays a flat curated list.
 
 ### Playing a review
 When a review is opened, the plugin searches your enabled streaming services for the album and, on a match, turns the row into a **directly-playable album** with the **service's own artwork** — so you can play it or add it to the queue without searching. Unmatched reviews keep their Pitchfork cover and open a detail page with the capsule and a **Read the full review** link.
+
+### Hide non-playable reviews
+By default every review shows — matched ones are one-tap playable, unmatched ones keep their Pitchfork cover and link out to the review. If you'd rather see only what you can play, turn on **Plugin Settings → Hide non-playable reviews** and the list shows only reviews that matched a streaming album on one of your services.
 
 ### Genres
 Each review carries its Pitchfork genre(s) — shown on the row's second line (next to the date) and on the detail page.
@@ -91,6 +98,8 @@ Open **Plugin Settings** from the top of the plugin's page (or **Settings → Ad
 | **Qobuz search priority** | Order Qobuz is searched in (0 = never) | 1 |
 | **Tidal search priority** | Order Tidal is searched in (0 = never) | 2 |
 | **Deezer search priority** | Order Deezer is searched in (0 = never) | 3 |
+| **Group Latest Reviews by** | Divide Latest Reviews by Pitchfork genre or by date (weekly headers) | Genre |
+| **Hide non-playable reviews** | Only show reviews that matched a streaming album on one of your services | Off |
 | **Extra debug logging** | Logs feed fetches and match decisions to the server log while diagnosing | Off |
 
 ---

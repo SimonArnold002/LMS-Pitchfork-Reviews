@@ -14,7 +14,7 @@ sub name { 'PLUGIN_PITCHFORKREVIEWS' }
 sub page { 'plugins/PitchforkReviews/settings.html' }
 
 sub prefs {
-    return ($prefs, qw(svc_priority_qobuz svc_priority_tidal svc_priority_deezer hide_unmatched debug_log));
+    return ($prefs, qw(svc_priority_qobuz svc_priority_tidal svc_priority_deezer hide_unmatched group_by debug_log));
 }
 
 sub handler {
@@ -37,6 +37,13 @@ sub handler {
             else {
                 $params->{"pref_svc_priority_$svc"} = $prefs->get("svc_priority_$svc") // 0;
             }
+        }
+
+        # Grouping mode is a fixed enum — keep the current value on any unexpected
+        # (or absent) POST rather than writing garbage into the pref.
+        my $gb = $params->{pref_group_by};
+        unless (defined $gb && ($gb eq 'date' || $gb eq 'genre')) {
+            $params->{pref_group_by} = $prefs->get('group_by') // 'date';
         }
     }
 
