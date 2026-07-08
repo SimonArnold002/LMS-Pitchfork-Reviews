@@ -111,10 +111,9 @@ sub fetchFeed {
     Plugins::PitchforkReviews::API::getListing(sub {
         my $items = shift;
         _resolveSection($client, $items, sub {
-            my $vis  = _visibleItems($items);
             my @rows = ( _refreshRow($client, 'reviews') );
-            if (@$vis) {
-                push @rows, @{ _groupedRows($client, $vis, $headers) };
+            if (@$items) {
+                push @rows, @{ _groupedRows($client, $items, $headers) };
             }
             else {
                 push @rows, { name => cstring($client, 'PLUGIN_PITCHFORKREVIEWS_EMPTY'), type => 'text' };
@@ -131,15 +130,89 @@ sub fetchBnm {
     Plugins::PitchforkReviews::API::getBnm(sub {
         my $items = shift;
         _resolveSection($client, $items, sub {
-            my $vis  = _visibleItems($items);
             my @rows = ( _refreshRow($client, 'bnm') );
-            if (@$vis) {
-                push @rows, map { _reviewRow($client, $_) } @$vis;
+            if (@$items) {
+                push @rows, map { _reviewRow($client, $_) } @$items;
             }
             else {
                 push @rows, { name => cstring($client, 'PLUGIN_PITCHFORKREVIEWS_EMPTY'), type => 'text' };
             }
             $cb->({ items => \@rows, cachetime => 0 });
+        });
+    });
+}
+
+# ---------------------------------------------------------------------------
+# Material Skin home-page shelves (registered in Plugin::postinitPlugin via
+# HomeExtras.pm). Each is a FLAT card list — no Refresh row, no week/genre
+# dividers. Material uses the SAME feed for the carousel AND its "show all"
+# click-in, and re-traverses by item_id at quantity 1 for playback, so a header
+# at index 0 (or any quantity-varying shape) would shift every card's item_id and
+# break deep streaming playback. So: always the WHOLE flat list — every review,
+# matched or not, at every request quantity — the same rule the ListenBrainz
+# plugin's home shelves follow. (We deliberately do NOT filter to matched-only
+# here: which items are matched varies as the resolver cache fills, which would
+# make the list membership — and thus every item_id — unstable between the
+# carousel render and the play re-traversal, breaking deep playback.)
+#
+# The per-item streaming resolve is pre-warmed by Plugin's background warm
+# (warmCache, below), so on a warm cache this build is all cache hits and
+# returns immediately — the home carousel never has to wait out an 18s live
+# resolve. On a cold cache (fresh install / first tick not yet run) it still
+# resolves during the build, degrading to the browse-list behaviour.
+# ---------------------------------------------------------------------------
+sub homeReviews {
+    my ($client, $cb, $args) = @_;
+    Plugins::PitchforkReviews::API::getListing(sub {
+        my $items = shift;
+        _resolveSection($client, $items, sub {
+            $cb->({ items => [ map { _reviewRow($client, $_) } @$items ], cachetime => 0 });
+        });
+    });
+}
+
+sub homeBnm {
+    my ($client, $cb, $args) = @_;
+    Plugins::PitchforkReviews::API::getBnm(sub {
+        my $items = shift;
+        _resolveSection($client, $items, sub {
+            $cb->({ items => [ map { _reviewRow($client, $_) } @$items ], cachetime => 0 });
+        });
+    });
+}
+
+# ---------------------------------------------------------------------------
+# Background warm: pre-resolve the Latest Reviews + Best New Music listings to
+# streaming so the Material home shelves (and the browse lists) open instantly
+# instead of running an up-to-18s resolve live on the home carousel — which
+# Material can time out waiting for, leaving the shelf empty/hung (the reason
+# the sibling ListenBrainz plugin never resolves inside its home feeds either).
+# Scheduled by Plugin::postinitPlugin shortly after startup, then daily, and
+# deferred while a library scan runs. Cheap on the daily tick: _findPlayable
+# matches are cached (7d found), so real work only happens for reviews that are
+# new since the last run. Needs a connected player for the streaming-service API
+# context; a quiet no-op (resolution deferred to first open) when none is
+# connected.
+# ---------------------------------------------------------------------------
+sub warmCache {
+    my ($client) = @_;
+    $client ||= (Slim::Player::Client::clients())[0];
+    unless ($client) {
+        _dbg("warm: no connected player — deferring resolve to first open");
+        return;
+    }
+
+    # Resolve the two listings sequentially (Latest Reviews, then Best New Music)
+    # so the warm stays gentle on the streaming APIs.
+    Plugins::PitchforkReviews::API::getListing(sub {
+        my $items = shift || [];
+        _dbg("warm: resolving " . scalar(@$items) . " Latest Reviews");
+        _resolveSection($client, $items, sub {
+            Plugins::PitchforkReviews::API::getBnm(sub {
+                my $bnm = shift || [];
+                _dbg("warm: resolving " . scalar(@$bnm) . " Best New Music");
+                _resolveSection($client, $bnm, sub { _dbg("warm: done"); });
+            });
         });
     });
 }
@@ -219,16 +292,6 @@ sub _refreshRow {
             }
         },
     };
-}
-
-# Apply the "hide non-playable reviews" setting: when on, keep only items that
-# resolved to a streaming album ($it->{_album}, stashed by _resolveSection). NB a
-# still-resolving item at the render deadline has no _album yet and is hidden until
-# the background warm fills the cache and the next open renders it.
-sub _visibleItems {
-    my ($items) = @_;
-    return $items unless $prefs->get('hide_unmatched');
-    return [ grep { $_->{_album} } @$items ];
 }
 
 # One review row. If it resolved to a streaming album ($it->{_album}), render THAT

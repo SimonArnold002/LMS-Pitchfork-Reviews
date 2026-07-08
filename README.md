@@ -15,10 +15,10 @@ Tested on LMS 9.x with the **Material Skin** (the classic skin works for the bas
 | **Group by date or genre** | Divide Latest Reviews by Pitchfork genre (default) or into weekly date sections | Nothing |
 | **One-tap playback** | A matched review plays straight from your streaming service — no searching | A streaming plugin |
 | **Real album artwork** | Matched rows swap the Pitchfork thumbnail for the service's own cover | A streaming plugin |
-| **Hide non-playable reviews** | Optionally hide reviews with no streaming match, so the whole list is one-tap playable | A streaming plugin |
 | **Genres** | Each review shows its Pitchfork genre(s) on the row and detail page | Nothing |
 | **Read the full review** | Links out to Pitchfork; the plugin shows only artist, album, date, genre and the short capsule | Nothing |
 | **Grid or list view** | Every row carries artwork, so Material's thumbnail/grid toggle stays available | Material Skin |
+| **Material home shelves** | Best New Music and Latest Reviews as scrollable rows on the Material home page | Material Skin |
 | **Add to Listen Later** | Matched albums carry the data the *Listen Later* plugin needs to save & replay them | Listen Later plugin |
 | **Refresh** | A row at the top of each list re-fetches the feed and re-matches on demand | Nothing |
 | **Choose your services** | Set the search order for Qobuz / Tidal / Deezer (or turn one off) | Nothing |
@@ -75,9 +75,6 @@ You can switch how **Latest Reviews** is divided in **Plugin Settings → Group 
 ### Playing a review
 When a review is opened, the plugin searches your enabled streaming services for the album and, on a match, turns the row into a **directly-playable album** with the **service's own artwork** — so you can play it or add it to the queue without searching. Unmatched reviews keep their Pitchfork cover and open a detail page with the capsule and a **Read the full review** link.
 
-### Hide non-playable reviews
-By default every review shows — matched ones are one-tap playable, unmatched ones keep their Pitchfork cover and link out to the review. If you'd rather see only what you can play, turn on **Plugin Settings → Hide non-playable reviews** and the list shows only reviews that matched a streaming album on one of your services.
-
 ### Genres
 Each review carries its Pitchfork genre(s) — shown on the row's second line (next to the date) and on the detail page.
 
@@ -86,6 +83,9 @@ A **Refresh** row sits at the top of each feed. It re-fetches the latest reviews
 
 ### Choosing services
 Under **Plugin Settings** you set a search **priority** for Qobuz, Tidal and Deezer (lower number = searched first; **0 = never use it**). The matcher stops at the first service that has the album, so ordering lets you prefer, say, Qobuz over Tidal.
+
+### Material home shelves
+With the **Material Skin**, two scrollable rows — **Pitchfork: Best New Music** and **Pitchfork: Latest Reviews** — appear on your home page, so a matched album is a tap away without opening the app. Tap **show all** on a row to open the full list. (The home rows are a flat, playable card list — the genre/week dividers live in the in-app **Latest Reviews** view.) The plugin pre-warms the matches in the background so the shelves open instantly rather than pausing to resolve. The shelves appear automatically when Material Skin is installed; no setup needed.
 
 ---
 
@@ -99,7 +99,6 @@ Open **Plugin Settings** from the top of the plugin's page (or **Settings → Ad
 | **Tidal search priority** | Order Tidal is searched in (0 = never) | 2 |
 | **Deezer search priority** | Order Deezer is searched in (0 = never) | 3 |
 | **Group Latest Reviews by** | Divide Latest Reviews by Pitchfork genre or by date (weekly headers) | Genre |
-| **Hide non-playable reviews** | Only show reviews that matched a streaming album on one of your services | Off |
 | **Extra debug logging** | Logs feed fetches and match decisions to the server log while diagnosing | Off |
 
 ---

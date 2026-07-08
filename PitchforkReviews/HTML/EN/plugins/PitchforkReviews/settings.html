@@ -26,10 +26,6 @@
 		<div style="margin:4px 0;"><label><input type="radio" name="pref_group_by" value="genre" [% IF prefs.group_by == 'genre' %]checked="checked"[% END %] /> [% 'PLUGIN_PITCHFORKREVIEWS_GROUP_BY_GENRE' | string %]</label></div>
 	[% END %]
 
-	[% WRAPPER setting title="PLUGIN_PITCHFORKREVIEWS_HIDE_UNMATCHED" desc="PLUGIN_PITCHFORKREVIEWS_HIDE_UNMATCHED_DESC" %]
-		<input type="checkbox" name="pref_hide_unmatched" value="1" [% IF prefs.hide_unmatched %]checked="checked"[% END %] />
-	[% END %]
-
 	[% WRAPPER setting title="PLUGIN_PITCHFORKREVIEWS_DEBUG_LOG" desc="PLUGIN_PITCHFORKREVIEWS_DEBUG_LOG_DESC" %]
 		<input type="checkbox" name="pref_debug_log" value="1" [% IF prefs.debug_log %]checked="checked"[% END %] />
 	[% END %]

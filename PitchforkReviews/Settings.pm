@@ -14,7 +14,7 @@ sub name { 'PLUGIN_PITCHFORKREVIEWS' }
 sub page { 'plugins/PitchforkReviews/settings.html' }
 
 sub prefs {
-    return ($prefs, qw(svc_priority_qobuz svc_priority_tidal svc_priority_deezer hide_unmatched group_by debug_log));
+    return ($prefs, qw(svc_priority_qobuz svc_priority_tidal svc_priority_deezer group_by debug_log));
 }
 
 sub handler {
