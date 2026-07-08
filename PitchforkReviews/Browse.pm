@@ -50,6 +50,7 @@ use constant REFRESH_ICON    => 'plugins/PitchforkReviews/html/images/pfr-refres
 use constant SETTINGS_ICON   => 'plugins/PitchforkReviews/html/images/pfr-cog_MTL_icon_settings.png';     # Material cog font-icon (like LBF)
 use constant BNM_TILE        => 'plugins/PitchforkReviews/html/images/menu-best-new-music.png';           # branded section cover
 use constant REVIEWS_TILE    => 'plugins/PitchforkReviews/html/images/menu-latest-reviews.png';           # branded section cover
+use constant HSA_TILE        => 'plugins/PitchforkReviews/html/images/menu-high-scoring-albums.png';      # branded section cover
 use constant LOGO_ICON       => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIcon.png';          # Pitchfork round mark (full-colour raster) — marks the "Read the full review" link
 use constant HEADER_ICON     => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIcon_svg.png';      # divider/header icon — MUST be the `_svg.png` Material-recolour form: Material renders an icon on a header-basic divider ONLY for `_svg.png`/`_MTL_*` icons, NOT a plain .png (verified vs LBF, whose dividers use its _svg.png)
 
@@ -61,19 +62,14 @@ use constant HEADER_ICON     => 'plugins/PitchforkReviews/html/images/PitchforkR
 sub topLevel {
     my ($client, $cb, $args) = @_;
 
-    # Pitchfork exposes a single album-reviews feed (no separate Best New Music
-    # feed — see API.pm), so one source tile for now. A second source (AllMusic,
-    # v2) drops in here as another _feedTile once its scraper exists.
+    # All three source tiles share one grouped feed (fetchFeed, dispatched by
+    # `source`): each groups into Material header dividers per the group_by pref.
+    # A second provider (AllMusic, v2) drops in here as another _feedTile.
     my $features = _featuresOf($args);   # 'h' => client (Material) supports header dividers
 
     my @items = (
-        {   # Best New Music — a curated, ranked list (flat, no week dividers)
-            name        => cstring($client, 'PLUGIN_PITCHFORKREVIEWS_BNM'),
-            type        => 'link',
-            image       => BNM_TILE,
-            url         => \&fetchBnm,
-            passthrough => [ {} ],
-        },
+        _feedTile($client, 'bnm',     'PLUGIN_PITCHFORKREVIEWS_BNM',     BNM_TILE,     $features),
+        _feedTile($client, 'hsa',     'PLUGIN_PITCHFORKREVIEWS_HSA',     HSA_TILE,     $features),
         _feedTile($client, 'reviews', 'PLUGIN_PITCHFORKREVIEWS_REVIEWS', REVIEWS_TILE, $features),
         {
             name    => cstring($client, 'PLUGIN_PITCHFORKREVIEWS_SETTINGS'),
@@ -101,38 +97,27 @@ sub _feedTile {
     };
 }
 
-# The album-reviews listing (page state), week-divided. Resolves each item to
-# streaming during the build so matched rows play from the list with the service's
-# artwork; unmatched rows keep the Pitchfork cover and drill to the detail page.
+# A source listing (page state), grouped into Material header dividers by the
+# group_by pref (week or genre — same as Latest Reviews). All three sources —
+# Latest Reviews, Best New Music, High Scoring Albums — share this feed, keyed by
+# $pt->{source}. Resolves each item to streaming during the build so matched rows
+# play from the list with the service's artwork; unmatched rows keep the Pitchfork
+# cover and drill to the detail page.
 sub fetchFeed {
     my ($client, $cb, $args, $pt) = @_;
+    my $source  = $pt->{source} // 'reviews';
     my $headers = _wantHeaders($pt->{features} // _featuresOf($args));
 
-    Plugins::PitchforkReviews::API::getListing(sub {
+    my $fetch = $source eq 'bnm' ? \&Plugins::PitchforkReviews::API::getBnm
+              : $source eq 'hsa' ? \&Plugins::PitchforkReviews::API::getHsa
+              :                    \&Plugins::PitchforkReviews::API::getListing;
+
+    $fetch->(sub {
         my $items = shift;
         _resolveSection($client, $items, sub {
-            my @rows = ( _refreshRow($client, 'reviews') );
+            my @rows = ( _refreshRow($client, $source) );
             if (@$items) {
                 push @rows, @{ _groupedRows($client, $items, $headers) };
-            }
-            else {
-                push @rows, { name => cstring($client, 'PLUGIN_PITCHFORKREVIEWS_EMPTY'), type => 'text' };
-            }
-            $cb->({ items => \@rows, cachetime => 0 });
-        });
-    });
-}
-
-# Best New Music (page state) — a flat, curated list, same resolve-during-build.
-sub fetchBnm {
-    my ($client, $cb, $args, $pt) = @_;
-
-    Plugins::PitchforkReviews::API::getBnm(sub {
-        my $items = shift;
-        _resolveSection($client, $items, sub {
-            my @rows = ( _refreshRow($client, 'bnm') );
-            if (@$items) {
-                push @rows, map { _reviewRow($client, $_) } @$items;
             }
             else {
                 push @rows, { name => cstring($client, 'PLUGIN_PITCHFORKREVIEWS_EMPTY'), type => 'text' };
@@ -181,6 +166,16 @@ sub homeBnm {
     });
 }
 
+sub homeHsa {
+    my ($client, $cb, $args) = @_;
+    Plugins::PitchforkReviews::API::getHsa(sub {
+        my $items = shift;
+        _resolveSection($client, $items, sub {
+            $cb->({ items => [ map { _reviewRow($client, $_) } @$items ], cachetime => 0 });
+        });
+    });
+}
+
 # ---------------------------------------------------------------------------
 # Background warm: pre-resolve the Latest Reviews + Best New Music listings to
 # streaming so the Material home shelves (and the browse lists) open instantly
@@ -202,8 +197,8 @@ sub warmCache {
         return;
     }
 
-    # Resolve the two listings sequentially (Latest Reviews, then Best New Music)
-    # so the warm stays gentle on the streaming APIs.
+    # Resolve the three listings sequentially (Latest Reviews, Best New Music, then
+    # High Scoring Albums) so the warm stays gentle on the streaming APIs.
     Plugins::PitchforkReviews::API::getListing(sub {
         my $items = shift || [];
         _dbg("warm: resolving " . scalar(@$items) . " Latest Reviews");
@@ -211,7 +206,13 @@ sub warmCache {
             Plugins::PitchforkReviews::API::getBnm(sub {
                 my $bnm = shift || [];
                 _dbg("warm: resolving " . scalar(@$bnm) . " Best New Music");
-                _resolveSection($client, $bnm, sub { _dbg("warm: done"); });
+                _resolveSection($client, $bnm, sub {
+                    Plugins::PitchforkReviews::API::getHsa(sub {
+                        my $hsa = shift || [];
+                        _dbg("warm: resolving " . scalar(@$hsa) . " High Scoring Albums");
+                        _resolveSection($client, $hsa, sub { _dbg("warm: done"); });
+                    });
+                });
             });
         });
     });
@@ -284,12 +285,10 @@ sub _refreshRow {
         url         => sub {
             my ($c, $cb, $args, $pt) = @_;
             my $reload = sub { $cb->({ items => [], nextWindow => 'refresh' }); };
-            if (($pt->{source} // '') eq 'bnm') {
-                Plugins::PitchforkReviews::API::getBnm($reload, force => 1);
-            }
-            else {
-                Plugins::PitchforkReviews::API::getListing($reload, force => 1);
-            }
+            my $src    = $pt->{source} // '';
+            if    ($src eq 'bnm') { Plugins::PitchforkReviews::API::getBnm($reload, force => 1); }
+            elsif ($src eq 'hsa') { Plugins::PitchforkReviews::API::getHsa($reload, force => 1); }
+            else                  { Plugins::PitchforkReviews::API::getListing($reload, force => 1); }
         },
     };
 }

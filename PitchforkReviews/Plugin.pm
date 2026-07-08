@@ -98,7 +98,7 @@ sub postinitPlugin {
         eval {
             require Plugins::PitchforkReviews::HomeExtras;
             Plugins::PitchforkReviews::HomeExtras->initPlugin();
-            $log->info("Registered Material Skin home extras (Best New Music + Latest Reviews)");
+            $log->info("Registered Material Skin home extras (Best New Music + High Scoring Albums + Latest Reviews)");
             1;
         } or $log->error("Failed to register Material home extras: $@");
     }

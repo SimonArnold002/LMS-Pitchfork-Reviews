@@ -27,6 +27,7 @@ FONT = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
 
 TILES = {
     "menu-best-new-music.png": "Best New Music",
+    "menu-high-scoring-albums.png": "High Scoring Albums",
     "menu-latest-reviews.png": "Latest Reviews",
 }
 

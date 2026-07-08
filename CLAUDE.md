@@ -22,13 +22,15 @@ Design decisions live in the auto-memory note `album-reviews-plugin-scope`.
 > **Pitchfork Reviews — for Lyrion Music Server.** Browse Pitchfork's album reviews inside LMS and play the reviewed album straight from your streaming library — one tap, no searching.
 
 - **Best New Music** — Pitchfork's curated Best New Music picks as a browsable, playable list.
-- **Latest Reviews** — the most recent album reviews, grouped by **genre** (default) or by **week**; dividers carry the Pitchfork mark.
+- **High Scoring Albums** — Pitchfork's curated high-scoring picks as a second browsable, playable list.
+- **Latest Reviews** — the most recent album reviews.
+- **Grouped your way** — all three lists group under **genre** (default) or **week** dividers, carrying the Pitchfork mark; one setting controls all three.
 - **One-tap playback** — each review is matched to a directly-playable album on **Qobuz / Tidal / Deezer**, shown with the service's own artwork; play it or queue it without searching.
 - **Genres on every row** — each review shows its Pitchfork genre(s) on the row and the detail page.
 - **Read the full review** — links out to Pitchfork; the plugin keeps only artist, album, date, genre and the short capsule (never reproduces the review).
 - **Grid or list** — every row carries artwork, so Material's thumbnail/grid toggle stays available.
 - **Choose your services** — set the Qobuz / Tidal / Deezer search order (or turn one off).
-- **Material home shelves** — Best New Music and Latest Reviews as scrollable rows on the Material home page.
+- **Material home shelves** — Best New Music, High Scoring Albums and Latest Reviews as scrollable rows on the Material home page.
 - **Add to Listen Later** — matched albums carry what the companion *Listen Later* plugin needs to save & replay them.
 - **Smart matching** — folds stylised spellings (*WOR$T* = *Worst*, *P!nk* = *Pink*) and a trailing EP/LP so more reviews resolve to a playable album.
 
@@ -36,23 +38,24 @@ Design decisions live in the auto-memory note `album-reviews-plugin-scope`.
 
 **Install:** add `https://simonarnold002.github.io/LMS-Pitchfork-Reviews/repo.xml` in LMS → Settings → Plugins.
 
-### Latest per-release post (0.6.1)
+### Latest per-release post (0.7.1)
 
-> **Pitchfork Reviews 0.6.1 — for Lyrion Music Server** 🎵
-> **New: Material home shelves** — Best New Music and Latest Reviews now appear as scrollable rows right on your Material home page, playable in a tap.
-> Plus (0.5.x): **Latest Reviews grouped by genre** (the new default) as well as by week — reviews under their Pitchfork genre, newest first, with branded Pitchfork dividers.
-> _Fixes & polish:_ home shelves now pre-warm in the background so they open instantly instead of pausing to resolve; the shelves always show the full flat list for reliable one-tap playback; genre names with a slash (Pop/R&B, Folk/Country) group and label correctly.
+> **Pitchfork Reviews 0.7.1 — for Lyrion Music Server** 🎵
+> **New: genre/week dividers everywhere** — Best New Music and High Scoring Albums now group under the same Pitchfork-marked genre (or week) headers as Latest Reviews, all driven by the one grouping setting.
 > Install: `https://simonarnold002.github.io/LMS-Pitchfork-Reviews/repo.xml`
 > #LyrionMusicServer #Pitchfork #Squeezebox #SelfHosted
+
+_Prior (0.7.0): New High Scoring Albums source — its own browsable, one-tap-playable list + matching Material home shelf._
 
 ## Naming
 Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 (`Plugins::PitchforkReviews::*`); prefs `plugin.pitchforkreviews`; command tag
 `pitchforkreviews`; cache prefix `pfr:`; zip `PitchforkReviews.zip`; display name
-"Pitchfork Reviews" with two feed tiles "Best New Music" + "Latest Reviews". (The
+"Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
+"Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: 0.6.1
+## Status: 0.7.1
 Working end to end (page-state parse, streaming resolve to Qobuz/Tidal/Deezer,
 genres, week/genre dividers, grid view, ListenLater favurl handshake, branded section
 tiles + Settings cog, "Read the full review" reachable on matched rows too,
@@ -63,7 +66,9 @@ installed/not-installed with its priority input, ported from LBF),
 PRIMARY Pitchfork genre, or `'date'` = weekly dividers via `_weeklyRows` —
 `_groupedRows` dispatches; genres ordered newest-review-first, newest-first within
 each; both modes share `_divHeader`, whose divider icon is the Pitchfork
-`HEADER_ICON`; Latest Reviews only — BNM stays flat.
+`HEADER_ICON`. **0.7.1: grouping applies to ALL THREE browse lists** (Best New Music,
+High Scoring Albums, Latest Reviews) — the one `group_by` setting drives every one;
+BNM/HSA are no longer flat (their home shelves stay flat, see below).
 **Genre-split fix (0.5.3):** `_genreKey` splits the display `genre` on the ` / ` JOIN
 delimiter only — `m{\s+/\s+}`, spaces REQUIRED — because Pitchfork's own genre NAMES
 contain a bare slash (`Pop/R&B`, `Folk/Country`). The old `m{\s*/\s*}` split inside
@@ -99,8 +104,8 @@ EVERY zip rebuild: bump the version (install.xml + repo.xml) AND recompute the s
 PitchforkReviews/
 ├── Plugin.pm    # OPMLBased entry point; prefs; log category
 ├── API.pm       # Async Pitchfork page-state (Verso __PRELOADED_STATE__) fetch + parse + caching
-├── Browse.pm    # Browse feeds (top level, per-source feed, review detail) + the album streaming resolver + home-shelf feeds (homeBnm/homeReviews)
-├── HomeExtras.pm # Material Skin home-page shelves (0.6.0): PFRBnm + PFRReviews HomeExtraBase subclasses
+├── Browse.pm    # Browse feeds (top level, per-source feed, review detail) + the album streaming resolver + home-shelf feeds (homeBnm/homeHsa/homeReviews)
+├── HomeExtras.pm # Material Skin home-page shelves (0.6.0; PFRHsa added 0.7.0): PFRBnm + PFRHsa + PFRReviews HomeExtraBase subclasses
 ├── Settings.pm  # Streaming-service priorities + debug-log toggle
 ├── strings.txt  # EN strings
 ├── install.xml  # <extension> (singular — manual-install format)
@@ -109,7 +114,8 @@ repo.xml         # <extensions> (plural — repo-install manifest)
 ```
 
 ## Architecture
-- **Sources** (`API.pm`, page-state parser — reworked 0.2.0): both sources parse
+- **Sources** (`API.pm`, page-state parser — reworked 0.2.0): all three sources
+  (Latest Reviews, Best New Music, High Scoring Albums) parse
   the listing pages' embedded Verso state `window.__PRELOADED_STATE__`, NOT the RSS
   feed or ld+json. `_parseState`: `_extractState` (string/escape-aware brace scan) →
   `from_json` → `_walkReviews` collects nodes with `contentType=="review"` → per
@@ -119,27 +125,35 @@ repo.xml         # <extensions> (plural — repo-install manifest)
   (a list — deduped + joined " / "; the odd review has none). `getListing()` =
   `/reviews/albums/` (capped 30 ≈ last 2 weeks), `getBnm()` = `/reviews/best/albums/`
   (all items on that page ARE the BNM picks — the `isBestNewMusic` JSON flag is
-  unreliable/false even there). Cached `pfr:listing:3` / `pfr:bnm:3` (3h + 7d
-  fallback). `from_json` yields proper characters (no mojibake). Score is available
+  unreliable/false even there). `getHsa()` = `/reviews/best/high-scoring-albums/`
+  (another curated page whose items ARE the picks, uncapped like BNM). Cached
+  `pfr:listing:3` / `pfr:bnm:3` / `pfr:hsa:3` (3h + 7d fallback). `from_json` yields proper characters (no mojibake). Score is available
   but not displayed yet; full review text is never stored (linked out — copyright).
-- **Menu** (`Browse.pm`): top = Best New Music + Latest Reviews + Plugin Settings.
-  The two feed tiles carry **branded section covers** (`menu-best-new-music.png` /
-  `menu-latest-reviews.png` — light card + the red Pitchfork mark + bold title + red
+- **Menu** (`Browse.pm`): top = Best New Music + High Scoring Albums + Latest Reviews
+  + Plugin Settings.
+  The three feed tiles carry **branded section covers** (`menu-best-new-music.png` /
+  `menu-high-scoring-albums.png` / `menu-latest-reviews.png` — light card + the red
+  Pitchfork mark + bold title + red
   accent bar, generated by `tools/make_covers.py` from the shipped app icon); Plugin
   Settings uses the **cog** font-icon `pfr-cog_MTL_icon_settings.png` (Material
   `_MTL_icon_settings` convention, same as LBF). The list row's `line2` separator is a
   middle dot via a **double-quoted** `"\x{b7}"` — a single-quoted `'\x{b7}'` prints the
   literal escape (the 0.4.0 "odd text before the genre" fix).
-  Reviews are divided by Material headers — by week (`pubDate` grouped, default) or
-  by **genre** (`group_by` pref → `_genreRows`, primary Pitchfork genre); BNM is a flat
-  curated list. Divider headers now carry the Pitchfork `LOGO_ICON`. Each list open
+  All three browse lists are divided by Material headers — by week (`pubDate`
+  grouped) or by **genre** (`group_by` pref → `_genreRows`, primary Pitchfork
+  genre; genre is the default). **0.7.1:** the three source tiles share ONE feed —
+  `fetchFeed`, dispatched by `$pt->{source}` ('bnm'|'hsa'|'reviews') threaded
+  through `_feedTile` (which also threads `features` so headers render) — so BNM
+  and High Scoring Albums group exactly like Latest Reviews. (`fetchBnm`/`fetchHsa`
+  removed; note BNM's curated ranking order is not preserved once grouped.) Divider
+  headers carry the Pitchfork `LOGO_ICON`. Each list open
   resolves every item to streaming **during the build**
   (`_resolveSection`, bounded concurrency 6, 18s render deadline then partial +
   background cache-warm). All dynamic feeds return `cachetime => 0`.
-- **Home shelves** (`HomeExtras.pm` + `Browse::homeBnm`/`homeReviews`, 0.6.0;
-  hardened 0.6.1): registered in `Plugin::postinitPlugin` (guarded on MaterialSkin +
-  `->can('registerHomeExtra')`, quiet no-op otherwise), two `HomeExtraBase`
-  subclasses `PFRBnm`/`PFRReviews`. **Critical rule (ported from LBF's 0.6.11
+- **Home shelves** (`HomeExtras.pm` + `Browse::homeBnm`/`homeHsa`/`homeReviews`, 0.6.0;
+  hardened 0.6.1; third shelf 0.7.0): registered in `Plugin::postinitPlugin` (guarded on MaterialSkin +
+  `->can('registerHomeExtra')`, quiet no-op otherwise), three `HomeExtraBase`
+  subclasses `PFRBnm`/`PFRHsa`/`PFRReviews`. **Critical rule (ported from LBF's 0.6.11
   lesson):** a home-shelf feed MUST be a FLAT card list — NO Refresh row, NO
   week/genre dividers — and must NOT vary by request quantity. Material uses the
   same feed for the carousel and its "show all" click-in and re-traverses by
@@ -156,8 +170,8 @@ repo.xml         # <extensions> (plural — repo-install manifest)
   `Slim::Music::Import->stillScanning`), so on a warm cache the home build is all
   cache hits and returns immediately instead of making Material wait out an 18s live
   resolve (which it can time out on → empty/hung shelf, the reason LBF never
-  resolves inside its home feeds). `warmCache` resolves getListing then getBnm
-  sequentially via `_resolveSection`, using the first connected player for the
+  resolves inside its home feeds). `warmCache` resolves getListing, getBnm, then
+  getHsa sequentially via `_resolveSection`, using the first connected player for the
   streaming API context (a no-op with no player). Cold cache still resolves during
   the build (degrades to the browse-list behaviour).
 - **Rows** (`_reviewRow`): a MATCHED item renders as the streaming album node —
