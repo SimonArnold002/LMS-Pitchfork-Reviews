@@ -626,14 +626,14 @@ sub _streamingAdapters {
 
     push @adapters, {
         name => 'Qobuz', icon => _pluginIcon('Plugins::Qobuz::Plugin'),
-        run  => \&_searchQobuz,
+        run  => \&_searchQobuz, query_enc => 'chars',
     } if Plugins::Qobuz::Plugin->can('getAPIHandler')
       && Plugins::Qobuz::Plugin->can('_albumItem')
       && Plugins::Qobuz::Plugin->can('QobuzGetTracks');   # reattach method for cached matches (see _rebuildStreamItems)
 
     push @adapters, {
         name => 'Tidal', icon => _pluginIcon('Plugins::TIDAL::Plugin'),
-        run  => \&_searchTidal,
+        run  => \&_searchTidal, query_enc => 'chars',
     } if Plugins::TIDAL::Plugin->can('getAPIHandler')
       && Plugins::TIDAL::Plugin->can('getAlbum')
       && Plugins::TIDAL::Plugin->can('_renderAlbum');
@@ -646,7 +646,7 @@ sub _streamingAdapters {
     # for that reattach (else a cached match drops on re-read).
     push @adapters, {
         name => 'Deezer', icon => _pluginIcon('Plugins::Deezer::Plugin'),
-        run  => \&_searchDeezer,
+        run  => \&_searchDeezer, query_enc => 'bytes',
     } if Plugins::Deezer::Plugin->can('getAPIHandler')
       && Plugins::Deezer::Plugin->can('_renderAlbum')
       && Plugins::Deezer::Plugin->can('getAlbum');
@@ -691,7 +691,7 @@ sub _pluginIcon {
 sub _streamKey {
     my ($idPart) = @_;
     my $svcOrder = join(',', map { lc $_->{name} } _orderedAdapters());
-    my $key = 'pfr:stream:3:' . $svcOrder . ':' . ($idPart // '');   # :3: = adds ListenLater favorites_url (+_albumid); re-resolves cached matches
+    my $key = 'pfr:stream:6:' . $svcOrder . ':' . ($idPart // '');   # :6: = matcher gains the self-titled-album exact rule (fleet sync, DSC 0.11.1); flushes cached matches
     utf8::encode($key) if utf8::is_utf8($key);   # octet key — non-Latin can't crash md5
     return $key;
 }
@@ -713,9 +713,15 @@ sub _findPlayable {
 
     # Send the RAW artist to each service search (normalisation turns punctuation
     # into spaces, which the services' own search can't match); keep the normalised
-    # forms for our _albumMatches validation only.
-    my $queryEnc = $artist;
-    utf8::encode($queryEnc) if utf8::is_utf8($queryEnc);
+    # forms for our _albumMatches validation only. Built in BOTH spellings: Qobuz
+    # (uri_escape_utf8) and Tidal (Text::Unidecode) expect CHARACTER strings —
+    # octets double-encode ("Sigur Rós" searched as "Sigur RÃ³s" -> junk/empty;
+    # found + fixed in the Discography plugin 2026-07-10) — while Deezer's
+    # complex_to_query wants OCTETS. Each adapter's query_enc picks its spelling.
+    my $qChars = $artist;
+    utf8::decode($qChars) unless utf8::is_utf8($qChars);   # no-op if not valid UTF-8
+    my $qBytes = $artist;
+    utf8::encode($qBytes) if utf8::is_utf8($qBytes);
 
     my @adapters = _orderedAdapters();
     unless (@adapters) {
@@ -798,7 +804,8 @@ sub _findPlayable {
             $settle->(undef);
         });
 
-        eval { $a->{run}->($client, $queryEnc, $artistNorm, $albumNorm, $svc, $settle); 1 } or do {
+        my $queryEnc = ($a->{query_enc} || 'bytes') eq 'chars' ? $qChars : $qBytes;
+        eval { $a->{run}->($client, $queryEnc, $artistNorm, $albumNorm, $svc, $settle, $album); 1 } or do {
             $log->warn("resolve $svc failed: $@");
             $settle->(undef);
         };
@@ -912,7 +919,7 @@ sub _rebuildStreamItems {
 # Qobuz: search albums via the plugin's own API, keep title+artist matches, and
 # reuse the plugin's _albumItem so each result is a native, playable album node.
 sub _searchQobuz {
-    my ($client, $query, $artistNorm, $albumNorm, $svc, $collect) = @_;
+    my ($client, $query, $artistNorm, $albumNorm, $svc, $collect, $albumRaw) = @_;
 
     my $api = Plugins::Qobuz::Plugin::getAPIHandler($client);
     unless ($api) { $collect->(undef); return; }   # undef -> inconclusive
@@ -924,7 +931,7 @@ sub _searchQobuz {
         my $rendererFailed = 0;
         for my $album (@{ ($res && $res->{albums} && $res->{albums}{items}) || [] }) {
             my $candArtist = ref $album->{artist} eq 'HASH' ? $album->{artist}{name} : '';
-            next unless _albumMatches($artistNorm, $albumNorm, $candArtist, $album->{title});
+            next unless _albumMatches($artistNorm, $albumNorm, $candArtist, $album->{title}, $albumRaw);
             next if defined $album->{streamable} && !$album->{streamable};   # drop bogus non-streamable dupes
             # Guard the foreign renderer — a die here is inside this async callback,
             # outside _findPlayable's eval; skip a bad item, don't stall the service.
@@ -944,7 +951,7 @@ sub _searchQobuz {
 
 # Tidal: mirror of _searchQobuz using the Tidal plugin's own API + renderer.
 sub _searchTidal {
-    my ($client, $query, $artistNorm, $albumNorm, $svc, $collect) = @_;
+    my ($client, $query, $artistNorm, $albumNorm, $svc, $collect, $albumRaw) = @_;
 
     my $api = Plugins::TIDAL::Plugin::getAPIHandler($client);
     unless ($api) { $collect->(undef); return; }
@@ -958,7 +965,7 @@ sub _searchTidal {
             next unless ref $album eq 'HASH';
             my $artistRef  = $album->{artist} || ($album->{artists} && $album->{artists}[0]) || {};
             my $candArtist = ref $artistRef eq 'HASH' ? $artistRef->{name} : '';
-            next unless _albumMatches($artistNorm, $albumNorm, $candArtist, $album->{title});
+            next unless _albumMatches($artistNorm, $albumNorm, $candArtist, $album->{title}, $albumRaw);
             my $item = eval { Plugins::TIDAL::Plugin::_renderAlbum($album) };
             if ($@ || ref $item ne 'HASH') {
                 $log->warn("Tidal _renderAlbum failed: $@") if $@;
@@ -978,7 +985,7 @@ sub _searchTidal {
 # raw album hashes; `_renderAlbum` returns a native album node (`url => \&getAlbum`
 # coderef, id in passthrough) that round-trips the cache exactly like Tidal's.
 sub _searchDeezer {
-    my ($client, $query, $artistNorm, $albumNorm, $svc, $collect) = @_;
+    my ($client, $query, $artistNorm, $albumNorm, $svc, $collect, $albumRaw) = @_;
 
     my $api = Plugins::Deezer::Plugin::getAPIHandler($client);
     unless ($api) { $collect->(undef); return; }
@@ -996,7 +1003,7 @@ sub _searchDeezer {
             next unless ref $album eq 'HASH';
             my $artistRef  = $album->{artist} || ($album->{artists} && $album->{artists}[0]) || {};
             my $candArtist = ref $artistRef eq 'HASH' ? $artistRef->{name} : '';
-            next unless _albumMatches($artistNorm, $albumNorm, $candArtist, $album->{title});
+            next unless _albumMatches($artistNorm, $albumNorm, $candArtist, $album->{title}, $albumRaw);
             my $item = eval { Plugins::Deezer::Plugin::_renderAlbum($album) };
             if ($@ || ref $item ne 'HASH') {
                 $log->warn("Deezer _renderAlbum failed: $@") if $@;
@@ -1019,11 +1026,35 @@ sub _searchDeezer {
 # (word boundary) AND the artist matches. With no artist to disambiguate, only an
 # exact title match counts.
 sub _albumMatches {
-    my ($artistNorm, $albumNorm, $candArtist, $candTitle) = @_;
+    my ($artistNorm, $albumNorm, $candArtist, $candTitle, $albumRaw) = @_;
 
-    return 0 if length $albumNorm < 2;
+    # All-punctuation / single-char titles ("( )", "X") normalise to (near)
+    # nothing, so the standard path can't see them. Compare a punctuation-
+    # PRESERVING form instead - lowercase, whitespace stripped: "( )" == "()"
+    # but != "( ) (live)". Exact equality ONLY (a prefix rule would let "x"
+    # swallow "xx") and the artist gate is mandatory. (Ported from the
+    # Discography plugin 0.10.3, 2026-07-10.)
+    if (length $albumNorm < 2) {
+        my $ap = _punctNorm($albumRaw);
+        return 0 unless length $ap;
+        return 0 unless _punctNorm($candTitle) eq $ap;
+        return 0 if $artistNorm eq '';
+        return _artistMatch($artistNorm, _norm($candArtist));
+    }
+
     my $t = _norm($candTitle);
     return 0 if $t eq '';
+
+    # SELF-TITLED releases ("The Beatles", "Weezer") match on the EXACT title only:
+    # every fallback below reads "<album> <extra>" as an edition of the same album,
+    # which is catastrophic when the album title IS the artist name — it swallows
+    # "The Beatles 1962-1966" (Red), "…1967-1970" (Blue), "…Anthology 1". _norm
+    # already strips brackets, so "The Beatles (White Album)"/"(Remastered)" still
+    # match. (Ported from the Discography plugin 0.11.1 — fleet matcher sync.)
+    if (length($artistNorm) && $albumNorm eq $artistNorm) {
+        return 0 unless $t eq $albumNorm;
+        return _artistMatch($artistNorm, _norm($candArtist));
+    }
 
     my $ok = ($t eq $albumNorm || index($t, "$albumNorm ") == 0);
 
@@ -1051,6 +1082,19 @@ sub _albumMatches {
         $ok = 1 if length($aa) >= 2 && length($ta) >= 2
                 && ($ta eq $aa || index($ta, "$aa ") == 0);
     }
+
+    # Titles carrying the ARTIST NAME as a prefix on ONE side only - e.g. the
+    # release "Belle and Sebastian Write About Love" vs the source title
+    # "Write About Love". Strip a leading "<artist> " from both sides and
+    # re-compare, gated on a >=3 char remainder; the artist check below still
+    # applies. (Ported from the Discography plugin 0.9.1.)
+    if (!$ok && length $artistNorm) {
+        my $ab = _stripArtistPrefix($albumNorm, $artistNorm);
+        my $tb = _stripArtistPrefix($t, $artistNorm);
+        if (($ab ne $albumNorm || $tb ne $t) && length($ab) >= 3 && length($tb) >= 3) {
+            $ok = 1 if $tb eq $ab || index($tb, "$ab ") == 0;
+        }
+    }
     return 0 unless $ok;
 
     # With no artist to disambiguate, require an exact FULL-norm title (the ascii
@@ -1065,6 +1109,25 @@ sub _stripFmt {
     my $s = shift // '';
     $s =~ s/\s+(?:ep|lp)$//;
     return $s;
+}
+
+# Lowercased, whitespace-stripped, punctuation KEPT - only for titles _norm
+# erases (see the short-title branch in _albumMatches).
+sub _punctNorm {
+    my $s = shift // '';
+    if (!utf8::is_utf8($s) && $s =~ /[^\x00-\x7f]/) {
+        my $d = $s;
+        $s = $d if utf8::decode($d);
+    }
+    $s = lc($s);
+    $s =~ s/\s+//g;
+    return $s;
+}
+
+sub _stripArtistPrefix {
+    my ($t, $a) = @_;
+    return substr($t, length($a) + 1) if index($t, "$a ") == 0;
+    return $t;
 }
 
 # _norm with all non-ASCII stripped — used only as an album-title fallback (see

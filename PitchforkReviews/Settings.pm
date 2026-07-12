@@ -47,12 +47,25 @@ sub handler {
         }
     }
 
+    return $class->SUPER::handler($client, $params);
+}
+
+# Slim::Web::Settings::handler persists the POST, refreshes its own `prefs`
+# template var from the store, and THEN calls this — the last hook before the
+# template renders.
+#
+# ANY template variable derived from a pref MUST be built here, not in handler().
+# `pfr_services` carries each service's CURRENT priority; built in handler() it
+# was read BEFORE the save, so saving a new priority re-rendered the page with
+# the old number still in the input (the save had actually applied — a reload
+# showed it). Fixed 0.7.4.
+sub beforeRender {
+    my ($class, $params, $client) = @_;
+
     # Expose the detected streaming services (installed + current priority) to
     # the template so it can render each as detected / not installed.
     require Plugins::PitchforkReviews::Browse;
     $params->{pfr_services} = Plugins::PitchforkReviews::Browse::serviceStatus();
-
-    return $class->SUPER::handler($client, $params);
 }
 
 1;
