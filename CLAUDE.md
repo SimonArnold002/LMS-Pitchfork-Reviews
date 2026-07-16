@@ -55,7 +55,47 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: 0.7.1
+## Status: 0.7.5
+**0.7.5 (2026-07-11): matcher — self-titled-album rule (fleet sync from Discography 0.11.1).**
+When an album's title normalises to the ARTIST name ("The Beatles", "Weezer"), `_albumMatches` now
+matches on the EXACT normalised title only, skipping the prefix/format/ascii/artist-prefix fallbacks —
+so a self-titled release stops swallowing "The Beatles 1962-1966" (Red), "…1967-1970" (Blue),
+"…Anthology 1". `_norm` still strips brackets, so "(White Album)"/"(Remastered)" still match; a wrong
+artist on an exact title still fails. Applied byte-identical to LBF + DSC + PFR (checker
+`_albumMatches` hash `7462b60e053d`) and, adapted, to LL's pinned variant; `matcher_sync_check.py`
+exits 0. `pfr:stream:5→6` flushes cached matches. `perl -c` clean; validated by the shared 14-assertion
+matcher test (LBF/PFR share identical code). (Sibling bumps: LBF 0.9.90, LL 0.1.70.)
+
+**0.7.4 (2026-07-10): fix — the settings page rendered STALE service priorities after a save.**
+`pfr_services` (which carries each service's CURRENT priority into the template) was built in
+`handler()` **before** `SUPER::handler` persists the POST, so saving a new priority re-rendered
+the page with the old number still in the input — the save HAD applied, but only a reload showed
+it. Moved to **`beforeRender`**, the platform's documented post-save hook: `Slim::Web::Settings::handler`
+persists each pref, refreshes its own `prefs` template var from the store, and only then calls
+`beforeRender($paramRef, $client)` immediately before rendering. **RULE (fleet-wide): any Settings
+template variable derived from a pref MUST be built in `beforeRender`, never in `handler` before
+`SUPER::handler`;** sanitising the incoming `$params->{pref_*}` still belongs in `handler`. Found
+via a code review of the Discography plugin, whose `Settings.pm` was ported from this one — so the
+defect came with the port. Fixed in all three the same session (DSC 0.10.4, LBF 0.9.85). No
+matcher/cache change, so **no `pfr:stream` bump**.
+
+**0.7.3 (2026-07-10): matcher fallbacks ported from the Discography plugin.**
+(1) All-punctuation / single-char titles ("( )", "X"): compare `_punctNorm` (lc,
+whitespace stripped, punctuation kept) of the RAW titles when `_norm` erases them —
+exact equality only + mandatory artist gate; raw title threaded as trailing `$albumRaw`
+through the 3 adapter signatures. (2) Artist-name-prefixed titles (`_stripArtistPrefix`
+both sides, >=3-char remainder). Existing EP/LP-strip and ascii fallbacks untouched
+(re-verified). `pfr:stream:4->5` flushes cached no-matches.
+
+**0.7.2 (2026-07-10): per-adapter search-query encoding fix** (ported from the
+Discography plugin's Sigur Rós diagnosis). `_findPlayable` octet-encoded the outgoing
+artist query for every adapter, but Qobuz (`uri_escape_utf8`) and Tidal
+(`Text::Unidecode` transliterate) expect CHARACTER strings — octets double-encode
+("Sigur Rós" searched as "Sigur RÃ³s" -> junk/empty results); Deezer's
+`complex_to_query` wants octets and was unaffected. Adapters now carry
+`query_enc => 'chars'|'bytes'` and `_findPlayable` builds both spellings, picking per
+adapter. `pfr:stream:3->4` flushes decisions resolved via mangled queries.
+
 Working end to end (page-state parse, streaming resolve to Qobuz/Tidal/Deezer,
 genres, week/genre dividers, grid view, ListenLater favurl handshake, branded section
 tiles + Settings cog, "Read the full review" reachable on matched rows too,
@@ -273,6 +313,11 @@ but the form Listen Later replays cleanly is the explicit one below.)
   `<url>` (main = GitHub Pages, dev = raw). A `v<version>` tag per release.
 - Bump version + recompute sha on EVERY zip rebuild.
 - Icon: `_svg.png` Material-recolour convention; SVG must use `#000` (3-digit).
+- **Settings template vars belong in `beforeRender`, not `handler`.** `Slim::Web::Settings::handler`
+  persists the POSTed prefs, refreshes `$params->{prefs}` from the store, and THEN calls
+  `beforeRender($params, $client)` before rendering. A pref-derived template var built earlier is
+  read PRE-save, so a save shows stale values. Sanitise `$params->{pref_*}` in `handler`; build
+  template vars in `beforeRender`. (0.7.4)
 
 ## GitHub Pages docs (README.html / index.html)
 `README.html` and the `index.html` redirect are **generated** from `README.md` by
@@ -292,3 +337,52 @@ Test over HTTP against the hostname (works on/off network): `http://plex:9000`
 (log.txt, jsonrpc.js). JSON-RPC menu queries need a player MAC. Manual install
 mirrors the ListenBrainz plugin (unzip into the Plugins dir, chown
 `squeezeboxserver:nogroup`, restart). Do NOT git commit/push without explicit OK.
+
+## Shared Matching Engine — FLEET SYNC RULE (2026-07-10)
+
+The artist/album/track matcher (`_norm`, `%FOLD`, `_artistMatch`, `_albumMatches`,
+fallback helpers `_stripFmt`/`_asciiNorm`/`_punctNorm`/`_stripArtistPrefix`; LBF also
+`_trackMatches`) is ONE engine with a copy in each of these four repos:
+
+- `LMS-ListenBrainz-New-Releases/ListenBrainzFreshReleases/Browse.pm` (origin, canonical)
+- `LMS-Pitchfork-Reviews/PitchforkReviews/Browse.pm`
+- `LMS-Discography/Discography/Sources.pm`
+- `LMS-Listen-to-Later/ListenLater/Sources.pm` (hash-pinned LENIENT variant — empty-artist
+  saved-item replay must still match; do NOT blindly align it)
+
+**THE RULE: a matching fix in ANY of these repos must be applied to ALL repos carrying the
+affected sub, in the SAME work session.** Enforcement — this must exit 0 before any matcher
+change is called done:
+
+    python3 LMS-ListenBrainz-New-Releases/tools/matcher_sync_check.py
+
+It diffs the comment-stripped CODE of every copy across all four repos. Deliberate variants
+are sha1-pinned inside the script with a reason, and FAIL the check if they change without a
+conscious re-pin (`--print-hashes` prints current hashes). After aligning: bump every touched
+repo's plugin version AND its match/decision cache versions (LBF: `lbf:stream` + `lbf:track` +
+`lbf:pl:resolved` — ALL layers; PFR: `pfr:stream`; DSC: `dsc:cand` only if the cached candidate
+shape changed — matching runs live there; LL: none — matching is live), rebuild zips + repo.xml
+sha. Never leave a matcher fix in one repo "to port later" — that is exactly how the 2026-07
+drift happened (LBF missed the P!nk/EP/ascii rules for months).
+
+## Streaming service search & debugging — CANONICAL REFERENCE (don't re-derive)
+
+The Qobuz/Tidal/Deezer search API is the SAME across the four streaming-resolver plugins (PFR, LBF,
+Discography, Listen-to-Later). **Full verified signatures live in `LMS-Discography/CLAUDE.md`
+("Service Plugin APIs — VERIFIED SIGNATURES") and the `[[service-search-and-debug]]` memory** — the
+authoritative table, kept from upstream source. Don't guess these; they break silently. Two gotchas
+that cause empty/junk pools:
+1. **Envelope: ONLY Qobuz hands back the whole result hash** (`{artists}{items}`/`{albums}{items}`);
+   Tidal & Deezer unwrap `{data}` themselves → plain ARRAY.
+2. **Query encoding differs** (`query_enc`): Qobuz + Tidal want a CHARACTER string, Deezer wants
+   BYTES. Feeding octets to Qobuz/Tidal double-encodes accents → junk/0 results (fixed 2026-07-10).
+
+**HOW TO DEBUG A SEARCH (the canonical method — stop trying variants each session):**
+1. `["pref","plugin.pitchforkreviews:debug_log","1"]` (via jsonrpc).
+2. Fire the feed once (Material, or a jsonrpc menu query with a player MAC from `["players",0,20]`).
+3. **Read the log over HTTP:** `curl -s http://plex:9000/log.txt` and grep the plugin prefix — the
+   key line names each service's candidate-pool size + samples. Empty pool = service search returned
+   nothing (encoding/availability); healthy pool + no match = a matcher gap.
+4. Turn `debug_log` back off. Test the MB mirror directly with a `curl` to `plex:5000/ws/2/…`
+   ([[mb-mirror-search-index-gotcha]]); test the library with `["artists",…,"search:NAME"]`.
+
