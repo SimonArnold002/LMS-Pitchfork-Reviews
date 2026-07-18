@@ -691,7 +691,7 @@ sub _pluginIcon {
 sub _streamKey {
     my ($idPart) = @_;
     my $svcOrder = join(',', map { lc $_->{name} } _orderedAdapters());
-    my $key = 'pfr:stream:6:' . $svcOrder . ':' . ($idPart // '');   # :6: = matcher gains the self-titled-album exact rule (fleet sync, DSC 0.11.1); flushes cached matches
+    my $key = 'pfr:stream:7:' . $svcOrder . ':' . ($idPart // '');   # :7: = favurl gains &al= (clean album for ListenLater); re-resolve so cached matches carry it
     utf8::encode($key) if utf8::is_utf8($key);   # octet key — non-Latin can't crash md5
     return $key;
 }
@@ -792,7 +792,7 @@ sub _findPlayable {
                 # ListenLater can't tell the service or replay the album. Same handshake
                 # the sibling plugin uses. (Cover rides ?cover=; artist rides &a= because
                 # Material sends these rows no $ARTISTNAME.)
-                _attachFavUrl($it, $svc, $it->{_cover}, $artist);
+                _attachFavUrl($it, $svc, $it->{_cover}, $artist, $album);
             }
             $result[$i] = \@matched;
             $resolve->();
@@ -817,7 +817,7 @@ sub _findPlayable {
 # _rebuildStreamItems (the album id rides `passthrough`, which survives the cache).
 # Guarded: Storable dies on unexpected nested refs and that must not stop the page.
 # Decorate a matched streaming album with a ListenLater-friendly favorites_url:
-#   <scheme>://album:<nativeId>[?cover=<url-encoded art>][&a=<url-encoded artist>]
+#   <scheme>://album:<nativeId>[?cover=<url-encoded art>][&a=<artist>][&al=<clean album>]
 # XMLBrowser copies an explicit $item->{favorites_url} into presetParams.favorites_url
 # (which Material exposes as $FAVURL) — without it the coderef `url` leaks as the favurl
 # and ListenLater sees a broken link with no service/id. ListenLater reads the scheme as
@@ -826,7 +826,7 @@ sub _findPlayable {
 # No native id → no favurl (the row still displays + plays here; it just can't be added
 # to ListenLater with full fidelity). Ported from ListenBrainz Fresh Releases.
 sub _attachFavUrl {
-    my ($it, $svc, $art, $artist) = @_;
+    my ($it, $svc, $art, $artist, $album) = @_;
     my $id = $it->{_albumid};
     return unless defined $id && length $id;
 
@@ -843,6 +843,16 @@ sub _attachFavUrl {
     if (defined $artist && !ref $artist && length $artist) {
         require URI::Escape;
         push @params, 'a=' . URI::Escape::uri_escape_utf8($artist);
+    }
+    # Our row label is "Artist - Album" (line1), and Material forces $ALBUMNAME/$TITLE to
+    # that whole label for online items — so ListenLater would store the artist doubled into
+    # the album title (breaking its list display AND its Played auto-detection, which keys on
+    # the album name). Pack the CLEAN album title as &al= (symmetric with &a=); ListenLater
+    # prefers it over the label, then strips it. Packed whenever we have a non-empty
+    # album string, same idiom (and same defined/ref/length guard) as &a=.
+    if (defined $album && !ref $album && length $album) {
+        require URI::Escape;
+        push @params, 'al=' . URI::Escape::uri_escape_utf8($album);
     }
 
     $fav .= '?' . join('&', @params) if @params;
