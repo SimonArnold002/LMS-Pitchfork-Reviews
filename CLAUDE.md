@@ -55,6 +55,24 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
+## Status: 0.7.8
+**0.7.8 (2026-07-21): FLEET MATCHER SYNC — a decorative `!` is punctuation, not the letter i; `&`/`+` fold to "and".**
+Ported from Discography 0.44.19/0.44.23 where the bug was found in the field. Landed across **DSC / LBF / PFR / SH
+in one session**; `matcher_sync_check.py` exits **0**. LL untouched (pinned legacy ASCII `_norm`).
+- **`!` folds to a letter only when TOKEN-INTERNAL** (`s/(?<=\w)!(?=\w)/i/g`) — `P!nk` -> `pink` still, while
+  `Wham!` / `Panic! At The Disco` / `Godspeed You! Black Emperor` shed the mark. The old unconditional fold made
+  a name spelled WITH the mark disagree with the same name WITHOUT it, and since `_albumMatches`' artist gate is
+  MANDATORY, every candidate was rejected — on Discography that surfaced as "No releases found" for an artist
+  whose MBID had resolved perfectly.
+- **`$` and `@` stay UNCONDITIONAL, and THIS FILE'S OWN CASE is why:** scoping them as well broke
+  `$uicideboy$` -> `suicideboy`, which no longer matches `Suicideboys` — the example named in `_norm`'s comment
+  here. Caught by a cross-repo BEHAVIOURAL harness, not by the sync check, which compares text and would have
+  reported four identical copies of the bug.
+- **`!!!` still keys `iii`** — a name of nothing but marks keeps the old fold, because `_artistMatch` returns 0
+  on an empty side and would reject every candidate.
+- **`&` and `+` -> "and"**, same family as `$`->s: one act arriving as "X & Y" and "X and Y" was becoming two rows.
+- **`pfr:stream` 7 -> 8**: that cache stores match DECISIONS computed with the old normaliser.
+
 ## Status: 0.7.7
 **0.7.7 (2026-07-18): doc-only — corrected the `&al=` comment in `_attachFavUrl`.**
 The comment claimed `&al=` was packed *"Only when it differs from the artist-prefixed label"*, but the code

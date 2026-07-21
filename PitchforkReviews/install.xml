@@ -8,7 +8,7 @@
 
 <module>Plugins::PitchforkReviews::Plugin</module>
 
-<version>0.7.7</version>
+<version>0.7.8</version>
 
 <description>Browse Pitchfork album reviews on your Squeezebox and play the reviewed album from your streaming library (Qobuz / Tidal / Deezer).</description>
 
