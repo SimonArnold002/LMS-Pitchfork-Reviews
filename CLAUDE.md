@@ -15,7 +15,7 @@ Design decisions live in the auto-memory note `album-reviews-plugin-scope`.
 
 **Maintain this section** (same convention as the sibling ListenBrainz / Listen Later plugins). Two living artefacts for announcing the plugin:
 1. **Overall feature summary** (below) — the social-media / GitHub Pages "drop page" copy. **Update it whenever a key feature is added, changed or removed** (not for bug fixes). Key-features-only, user-facing, no internals.
-2. **Per-release post** — when cutting a release, generate a short social post: lead with new **features**, then a short "Fixes & polish" line for notable bug fixes. Install line is the Pages repo URL. Hashtags: `#LyrionMusicServer #Pitchfork #Squeezebox #SelfHosted`.
+2. **Per-release post** — when cutting a release, generate a "What's new" post in the **fleet house template** (Variant B; canonical example = Listen Later). Structure, verbatim: header `🎵 What's new in Pitchfork Reviews — for Lyrion Music Server (LMS)` (no version number in it) → **two prose paragraphs** in a conversational voice, leading with the headline change → a `✨ What's new` header with `•` bullets (short label, em-dash, plain-English description) covering only what changed since the last **main** release; a single "smarter matching" bullet may fold in the notable bug fixes → the requirements + `Free and open source.` line → `👉 Full details & install: https://simonarnold002.github.io/LMS-Pitchfork-Reviews/` (the **bare Pages root**, not `repo.xml`) → a final tag line where only `#LyrionMusicServer` is a hashtag and the rest are plain words: `#LyrionMusicServer lms squeezebox pitchfork qobuz tidal deezer selfhosted`. **No** blockquote, **no** "Fixes & polish" heading, **no** bullet-only intro. (A launch post is the same shape with `🎵 Introducing …` and `✨ Features` covering the whole plugin.)
 
 ### Overall feature summary (keep current)
 
@@ -38,14 +38,27 @@ Design decisions live in the auto-memory note `album-reviews-plugin-scope`.
 
 **Install:** add `https://simonarnold002.github.io/LMS-Pitchfork-Reviews/repo.xml` in LMS → Settings → Plugins.
 
-### Latest per-release post (0.7.1)
+### Latest per-release post (0.7.9 — covers 0.7.6 → 0.7.9)
 
-> **Pitchfork Reviews 0.7.1 — for Lyrion Music Server** 🎵
-> **New: genre/week dividers everywhere** — Best New Music and High Scoring Albums now group under the same Pitchfork-marked genre (or week) headers as Latest Reviews, all driven by the one grouping setting.
-> Install: `https://simonarnold002.github.io/LMS-Pitchfork-Reviews/repo.xml`
-> #LyrionMusicServer #Pitchfork #Squeezebox #SelfHosted
+🎵 What's new in Pitchfork Reviews — for Lyrion Music Server (LMS)
 
-_Prior (0.7.0): New High Scoring Albums source — its own browsable, one-tap-playable list + matching Material home shelf._
+Some albums just refused to show up. If an artist styled their name with punctuation — Wham!, Panic! At The Disco, Godspeed You! Black Emperor — the plugin was reading that exclamation mark as a letter, so the review it had found and the album sitting in your streaming library no longer looked like the same record, and the row came back unplayable. That's fixed: a decorative mark is now treated as punctuation, while genuinely stylised spellings like P!nk and WOR$T still fold correctly. Acts that arrive from one service as "X & Y" and another as "X and Y" are now understood as one act too.
+
+The handoff to the companion Listen Later plugin also got tidied. Matched rows are labelled "Artist – Album", and Material passes that whole label through as the album name — so saved albums came back with the artist doubled into the title, which looked wrong and quietly broke Listen Later's played-album detection. Pitchfork Reviews now passes the clean album title alongside the artist, so saves land correctly and mark themselves played.
+
+✨ What's new
+• Punctuation-smart matching — a decorative "!" no longer blocks a match, so Wham!, Panic! At The Disco and Godspeed You! Black Emperor resolve to a playable album
+• One act, one row — "&" and "+" now read as "and", so the same band arriving from two services stops showing up twice
+• Cleaner Listen Later saves — matched albums save under their real title instead of "Artist – Album", and played detection works again
+• Visible settings toggle — the "Extra debug logging" checkbox now actually renders in Material, with a clickable label
+
+Works on LMS 9.x, best with the Material Skin. For playback you'll need at least one of Qobuz, Tidal or Deezer installed and signed in. Free and open source.
+
+👉 Full details & install: https://simonarnold002.github.io/LMS-Pitchfork-Reviews/
+
+#LyrionMusicServer lms squeezebox pitchfork qobuz tidal deezer selfhosted
+
+_Prior (0.7.1): genre/week dividers everywhere — Best New Music and High Scoring Albums group under the same Pitchfork-marked genre (or week) headers as Latest Reviews, driven by the one grouping setting._
 
 ## Naming
 Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
@@ -54,6 +67,19 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 0.7.9
+**0.7.9 (2026-07-29): fix — the settings checkbox was INVISIBLE in Material.**
+Fleet-wide (LBF 0.9.122, LL 0.1.73, Album-Booklet 0.1.3, here 0.7.9). Material's settings CSS gives a bare
+`<input type="checkbox">` no visible box, so "Extra debug logging" looked like a setting with no control at
+all — the pref was there and worked, you just could not see or hit it.
+- `settings.html`: the input is wrapped in a `<label>` with a visible "Enabled" caption (new string
+  `PLUGIN_PITCHFORKREVIEWS_ENABLED`), which is what Material styles into a real checkbox — and it makes the
+  caption itself a click target.
+- **Only bug #1 of the pair applies here.** The separate `undef // 1` default trap (an unticked checkbox posts
+  NOTHING, so a default-ON pref can never be turned off unless the handler coerces `pref_*` to 0/1) bites
+  default-ON toggles; `debug_log` defaults OFF, so this plugin has nothing to coerce.
+- No matcher/cache change, so **no `pfr:stream` bump**. Released to `main` as the 0.7.6→0.7.9 rollup.
 
 ## Status: 0.7.8
 **0.7.8 (2026-07-21): FLEET MATCHER SYNC — a decorative `!` is punctuation, not the letter i; `&`/`+` fold to "and".**
