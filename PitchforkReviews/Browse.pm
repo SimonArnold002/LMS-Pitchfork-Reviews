@@ -691,7 +691,7 @@ sub _pluginIcon {
 sub _streamKey {
     my ($idPart) = @_;
     my $svcOrder = join(',', map { lc $_->{name} } _orderedAdapters());
-    my $key = 'pfr:stream:6:' . $svcOrder . ':' . ($idPart // '');   # :6: = matcher gains the self-titled-album exact rule (fleet sync, DSC 0.11.1); flushes cached matches
+    my $key = 'pfr:stream:8:' . $svcOrder . ':' . ($idPart // '');   # :7: = favurl gains &al= (clean album for ListenLater); re-resolve so cached matches carry it
     utf8::encode($key) if utf8::is_utf8($key);   # octet key — non-Latin can't crash md5
     return $key;
 }
@@ -792,7 +792,7 @@ sub _findPlayable {
                 # ListenLater can't tell the service or replay the album. Same handshake
                 # the sibling plugin uses. (Cover rides ?cover=; artist rides &a= because
                 # Material sends these rows no $ARTISTNAME.)
-                _attachFavUrl($it, $svc, $it->{_cover}, $artist);
+                _attachFavUrl($it, $svc, $it->{_cover}, $artist, $album);
             }
             $result[$i] = \@matched;
             $resolve->();
@@ -817,7 +817,7 @@ sub _findPlayable {
 # _rebuildStreamItems (the album id rides `passthrough`, which survives the cache).
 # Guarded: Storable dies on unexpected nested refs and that must not stop the page.
 # Decorate a matched streaming album with a ListenLater-friendly favorites_url:
-#   <scheme>://album:<nativeId>[?cover=<url-encoded art>][&a=<url-encoded artist>]
+#   <scheme>://album:<nativeId>[?cover=<url-encoded art>][&a=<artist>][&al=<clean album>]
 # XMLBrowser copies an explicit $item->{favorites_url} into presetParams.favorites_url
 # (which Material exposes as $FAVURL) — without it the coderef `url` leaks as the favurl
 # and ListenLater sees a broken link with no service/id. ListenLater reads the scheme as
@@ -826,7 +826,7 @@ sub _findPlayable {
 # No native id → no favurl (the row still displays + plays here; it just can't be added
 # to ListenLater with full fidelity). Ported from ListenBrainz Fresh Releases.
 sub _attachFavUrl {
-    my ($it, $svc, $art, $artist) = @_;
+    my ($it, $svc, $art, $artist, $album) = @_;
     my $id = $it->{_albumid};
     return unless defined $id && length $id;
 
@@ -843,6 +843,16 @@ sub _attachFavUrl {
     if (defined $artist && !ref $artist && length $artist) {
         require URI::Escape;
         push @params, 'a=' . URI::Escape::uri_escape_utf8($artist);
+    }
+    # Our row label is "Artist - Album" (line1), and Material forces $ALBUMNAME/$TITLE to
+    # that whole label for online items — so ListenLater would store the artist doubled into
+    # the album title (breaking its list display AND its Played auto-detection, which keys on
+    # the album name). Pack the CLEAN album title as &al= (symmetric with &a=); ListenLater
+    # prefers it over the label, then strips it. Packed whenever we have a non-empty
+    # album string, same idiom (and same defined/ref/length guard) as &a=.
+    if (defined $album && !ref $album && length $album) {
+        require URI::Escape;
+        push @params, 'al=' . URI::Escape::uri_escape_utf8($album);
     }
 
     $fav .= '?' . join('&', @params) if @params;
@@ -1184,12 +1194,59 @@ sub _norm {
     # service's (and vice-versa): "WOR$T" == "Worst", "$uicideboy$" == "Suicideboys",
     # "P!nk" == "Pink". These map to a letter BEFORE the punctuation pass below turns
     # them into spaces. (The currency signs also cover €/£/¥ stylisations.)
+    # LEETSPEAK SUBSTITUTIONS - a punctuation mark standing in for a LETTER.
+    #
+    # Applied ONLY when a word character FOLLOWS the mark. That is precisely
+    # what separates a letter from decoration: "P!nk" -> pink and "Ke$ha" ->
+    # kesha (the mark sits INSIDE the word), while a trailing or free-standing
+    # mark is punctuation and falls through to the [^\p{Alnum}] rule below.
+    #
+    # WHY, and it is not cosmetic (field via DSC, 2026-07-21): the old
+    # unconditional fold made a name spelled WITH the mark disagree with the
+    # same name spelled WITHOUT it - "Layo & Bushwacka!" -> 'layo bushwackai'
+    # against 'layo bushwacka'. `_albumMatches`' artist gate is MANDATORY, so
+    # EVERY streaming candidate was rejected and the page read "No releases
+    # found" for an artist with a correctly resolved MBID. The same fold also
+    # made "Panic At The Disco" unsearchable without typing the "!".
+    #
+    # A name made ENTIRELY of these marks ("!!!", a real band) keeps the old
+    # unconditional fold: stripping would leave '', and `_artistMatch` rejects
+    # an empty side outright - i.e. this very bug in a new costume.
+    # "$" and "@" are UNCONDITIONAL: in a stylised name they are effectively
+    # always a letter, including at the END - "$uicideboy$" is Suicideboy(s),
+    # so the trailing "$" is an s, not decoration. Scoping the boundary rule
+    # below to them broke exactly that (caught by the cross-repo behaviour
+    # harness, which PFR documents as a supported case).
     $s =~ s/\$/s/g;
+    $s =~ s/\@/a/g;
+    # "!" IS different, and it is the one that motivated this: it has a real
+    # decorative use that the others do not - "Wham!", "Panic! At The Disco",
+    # "Godspeed You! Black Emperor", "Layo & Bushwacka!" - where the mark is
+    # punctuation and the name is spelled both ways in the wild. So "!" folds
+    # to a letter ONLY when a word character FOLLOWS it (inside a word, as in
+    # "P!nk"); otherwise it falls through to the [^\p{Alnum}] pass below.
+    #
+    # A name of nothing BUT marks ("!!!", a real band) keeps the unconditional
+    # fold: stripping would leave '', and `_artistMatch` rejects an empty side
+    # outright - this very bug in a new costume.
+    if ($s =~ /[\p{Alnum}]/) { $s =~ s/(?<=\w)!(?=\w)/i/g }
+    else                      { $s =~ s/!/i/g }
     $s =~ s/\x{20ac}/e/g;   # €
     $s =~ s/\x{a3}/l/g;     # £
     $s =~ s/\x{a5}/y/g;     # ¥
-    $s =~ s/!/i/g;
-    $s =~ s/\@/a/g;
+
+    # "&" and "+" are SPOKEN "and", and this is the same rule as every
+    # substitution above it - a symbol folded to the word it stands for, like
+    # $ -> s and ! -> i. Without it the two spellings key differently ("simon
+    # garfunkel" vs "simon and garfunkel", because & alone becomes a space
+    # below), so the SAME act arriving from two services became two search rows
+    # and only merged if MusicBrainz happened to record the variant as an
+    # alias. Field 2026-07-21: Deezer says "Layo and bushwacka!" where Tidal
+    # says "Layo & Bushwacka" - one act, two rows.
+    #
+    # "+" is included because services use it the same way; MB's own alias list
+    # for that duo literally carries "Layo + Bushwacka!".
+    $s =~ s/[&+]/ and /g;
     $s =~ s/[\(\[].*?[\)\]]//g;
     $s =~ s/[^\p{Alnum}]+/ /g;
     $s =~ s/^\s+//; $s =~ s/\s+$//;

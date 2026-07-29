@@ -55,7 +55,43 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: 0.7.5
+## Status: 0.7.8
+**0.7.8 (2026-07-21): FLEET MATCHER SYNC — a decorative `!` is punctuation, not the letter i; `&`/`+` fold to "and".**
+Ported from Discography 0.44.19/0.44.23 where the bug was found in the field. Landed across **DSC / LBF / PFR / SH
+in one session**; `matcher_sync_check.py` exits **0**. LL untouched (pinned legacy ASCII `_norm`).
+- **`!` folds to a letter only when TOKEN-INTERNAL** (`s/(?<=\w)!(?=\w)/i/g`) — `P!nk` -> `pink` still, while
+  `Wham!` / `Panic! At The Disco` / `Godspeed You! Black Emperor` shed the mark. The old unconditional fold made
+  a name spelled WITH the mark disagree with the same name WITHOUT it, and since `_albumMatches`' artist gate is
+  MANDATORY, every candidate was rejected — on Discography that surfaced as "No releases found" for an artist
+  whose MBID had resolved perfectly.
+- **`$` and `@` stay UNCONDITIONAL, and THIS FILE'S OWN CASE is why:** scoping them as well broke
+  `$uicideboy$` -> `suicideboy`, which no longer matches `Suicideboys` — the example named in `_norm`'s comment
+  here. Caught by a cross-repo BEHAVIOURAL harness, not by the sync check, which compares text and would have
+  reported four identical copies of the bug.
+- **`!!!` still keys `iii`** — a name of nothing but marks keeps the old fold, because `_artistMatch` returns 0
+  on an empty side and would reject every candidate.
+- **`&` and `+` -> "and"**, same family as `$`->s: one act arriving as "X & Y" and "X and Y" was becoming two rows.
+- **`pfr:stream` 7 -> 8**: that cache stores match DECISIONS computed with the old normaliser.
+
+## Status: 0.7.7
+**0.7.7 (2026-07-18): doc-only — corrected the `&al=` comment in `_attachFavUrl`.**
+The comment claimed `&al=` was packed *"Only when it differs from the artist-prefixed label"*, but the code
+adds it unconditionally whenever `$album` is non-empty (same `defined`/`!ref`/`length` guard as `&a=`). No
+behaviour change — comment now matches the code. Found by a code review of the 0.7.6 diff. Version bumped
+(not folded into 0.7.6) because 0.7.6 was already manually installed, and a same-version zip won't reinstall.
+
+**0.7.6 (2026-07-18): ListenLater interop — pack the CLEAN album title into the favurl as `&al=`.**
+Our matched rows label as `"Artist - Album"` (`line1`), and Material forces `$ALBUMNAME`/`$TITLE` to that
+whole label for online items — so Listen Later was storing the artist doubled into the album title. That's
+NOT cosmetic (the old CLAUDE note was wrong): it broke Listen Later's **Played auto-detection**, which keys on
+the album name (the polluted "Will Sheff - Extra Mile" never matches the playing track's clean "Extra Mile"),
+and showed doubled in its list. `_attachFavUrl` now packs the clean review album as a private `&al=` param —
+the symmetric partner of the `&a=` artist it already packs (both exist because Material sends these rows no
+clean `$ALBUMNAME`/`$ARTISTNAME`). Listen Later 0.1.71 reads `&al=` and prefers it over the label, then strips
+it (plus a one-off DB migration cleaning rows already saved). No matcher change — `_attachFavUrl` is outside
+the shared engine, and the row's own display (line1 = "Artist - Album") is unchanged. `pfr:stream:6→7` so
+existing cached matches re-resolve and gain `&al=` (the favurl is frozen into the cached item). `perl -c` clean.
+
 **0.7.5 (2026-07-11): matcher — self-titled-album rule (fleet sync from Discography 0.11.1).**
 When an album's title normalises to the ARTIST name ("The Beatles", "Weezer"), `_albumMatches` now
 matches on the EXACT normalised title only, skipping the prefix/format/ascii/artist-prefix fallbacks —
@@ -289,13 +325,22 @@ but the form Listen Later replays cleanly is the explicit one below.)
   (`scheme` = lc service = Listen Later's `qobuz`/`tidal`/`deezer` source tag). Listen Later reads
   the scheme as the source, `album:<id>` for direct replay, and strips the private `?cover=`/`&a=`
   params (artwork + artist) before saving.
-- **Why `&a=` (artist):** Material sends these matched rows **no `$ARTISTNAME`** (their subtitle
-  is the date/genre/capsule, not the artist), so the review artist is packed into the favurl; Listen
-  Later uses it as the fallback when `$ARTISTNAME` is empty. `?cover=` carries the native album art.
+- **Why `&a=` (artist) and `&al=` (clean album):** Material sends these matched rows **no clean
+  `$ARTISTNAME`/`$ALBUMNAME`** — the row's `line1` is `"Artist - Album"` and Material forces both
+  `$ALBUMNAME` and `$TITLE` to that whole label for online items, and the subtitle (`$ARTISTNAME`) is the
+  date/genre/capsule. So the favurl carries the clean pieces: `&a=<artist>` and (0.7.6) `&al=<album>`.
+  Listen Later reads `&a=` as the artist fallback and PREFERS `&al=` over the `"Artist - Album"` label,
+  then strips both. `?cover=` carries the native album art.
+- **Why `&al=` matters (0.7.6):** without it, Listen Later stored the album title WITH the artist prefixed
+  ("Will Sheff - Extra Mile"). NOT cosmetic — it broke Listen Later's **Played auto-detection** (it keys on
+  the album name, so the polluted title never matched the playing track's clean "Extra Mile") and showed
+  doubled in its list. Fixed in `_attachFavUrl` (pack `&al=`) + Listen Later 0.1.71 (read+prefer it, plus a
+  one-off migration for already-saved rows). The row's own display (line1 = "Artist - Album") is unchanged.
 - Survives the stream cache (`favorites_url`/`_albumid` are plain strings — only the coderef `url`
-  is stripped). Stream cache key bumped `:2:`→`:3:` so existing cached matches re-resolve and gain
-  the favurl. NB: `$ALBUMNAME` is the row's `line1` = "Artist - Album", so Listen Later stores that
-  as the album name (cosmetic; replay is by `album:<id>`, so it still plays the right album).
+  is stripped). The favurl is built during the fresh resolve and frozen into the cached item, so a cache HIT
+  serves the stored favurl as-is — the stream cache version is bumped **`pfr:stream:6`→`:7`** at 0.7.6 so
+  existing cached matches re-resolve and gain `&al=` (rather than serving the old favurl for up to 7d).
+  Replay is by `album:<id>`, so playback was always the right album regardless.
 
 ## Roadmap
 - **v1 (this)** — Pitchfork, feed-only, resolve to Qobuz/Tidal.
