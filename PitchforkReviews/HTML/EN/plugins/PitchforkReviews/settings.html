@@ -27,7 +27,7 @@
 	[% END %]
 
 	[% WRAPPER setting title="PLUGIN_PITCHFORKREVIEWS_DEBUG_LOG" desc="PLUGIN_PITCHFORKREVIEWS_DEBUG_LOG_DESC" %]
-		<input type="checkbox" name="pref_debug_log" value="1" [% IF prefs.debug_log %]checked="checked"[% END %] />
+		<label><input type="checkbox" name="pref_debug_log" value="1" [% IF prefs.debug_log %]checked="checked"[% END %] /> [% 'PLUGIN_PITCHFORKREVIEWS_ENABLED' | string %]</label>
 	[% END %]
 
 </div>
