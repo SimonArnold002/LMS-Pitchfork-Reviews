@@ -68,6 +68,75 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
+## Status: 0.7.11
+**0.7.11 (2026-07-30): doc-only — three subs' comment blocks had piled up above the wrong sub.**
+Found by a code review of the 0.7.10 diff. `_svcYear` + `_stripArtistAffix` were inserted BETWEEN
+`_attachFavUrl`'s doc block and `_attachFavUrl` itself, and `_cacheStream`'s block was already
+displaced before that — so lines 829–845 were ONE unbroken comment run documenting THREE different
+subs, all sitting above `sub _svcYear`, while `_attachFavUrl` (the whole ListenLater favurl
+contract) and `_cacheStream` opened with no comment at all. Each block moved back onto its own sub.
+- **Code is byte-identical to 0.7.10** — verified by diffing comment-stripped `Browse.pm` against
+  the 0.7.10 zip's copy; comment-line count unchanged at 396 (moved, none lost). `perl -c` clean,
+  `tools/t_svctitle.pl` 22/22.
+- One content edit inside the moved block: the favurl signature line still read
+  `[&al=<clean album>]` with no `&y=`, so it now reads `[&al=<service album>][&y=<year>]` to match
+  what 0.7.10 actually sends. Leaving it stale directly above the sub is the exact drift 0.7.7 was
+  cut to fix in this same file.
+- **No `pfr:stream` bump** (stays at `:9:`). The code is byte-identical to 0.7.10, so every cached
+  favurl is ALREADY correct — the `_streamKey` rule ("bump on ANY change to what the favurl
+  carries") isn't triggered, because it carries exactly what 0.7.10 carried. Flushing would make the
+  next open of each list re-resolve every item (`_resolveSection`, concurrency 6, 18s render
+  deadline then partial + background warm) for no behavioural gain. Same call as 0.7.4/0.7.9.
+- Version bumped rather than folded into 0.7.10 because 0.7.10 was already manually installed and a
+  same-version zip won't reinstall — the 0.7.7 precedent exactly.
+
+## Status: 0.7.10
+**0.7.10 (2026-07-30): ListenLater handshake — `&al=` now carries the MATCHED SERVICE's album title
+(not Pitchfork's), and the favurl gains `&y=` (the release year).**
+Ported from the sibling ListenBrainz plugin, which shipped the wrong name **three builds running**
+(its 0.9.144–0.9.147) before this was pinned down. Do not re-derive it here — the rule and both traps
+are recorded below.
+
+- **THE RULE: once a review is RESOLVED to a service album, the SERVICE's spelling is the only one
+  that works.** Two independent consumers are title-keyed: LL's Played auto-detection matches the
+  PLAYING track's album title (which the service reports), and LL's `artist|album|year` dedupe key
+  must agree with a direct add from that same service. 0.7.6 packed **Pitchfork's** spelling, which
+  fixed the "Artist - Album" pollution but left a different mismatch — and Pitchfork's differs often
+  enough to matter: it appends `" EP"`/`" LP"` that services drop, which is the entire reason
+  `_stripFmt` exists in the matcher. A release stored under a name the service never uses is silently
+  unmatchable: it plays perfectly and simply never reaches Played.
+- **TRAP 1 — do NOT read the rendered node.** `$it->{name}`/`{line1}` are each streaming plugin's
+  DISPLAY LABEL, and they bake the artist in, at opposite ends per service (Qobuz artist-first,
+  Bandcamp artist-last). LBF 0.9.145 shipped exactly that. Take the title from the RAW album hash —
+  `$album->{title}`, the same field `_albumMatches` already validates against, where the artist is a
+  separate argument, so it is the album title alone by construction.
+- **TRAP 2 — even the raw title can carry an artist affix**, and the MATCHER never notices, because
+  `_albumMatches` accepts a candidate that STARTS WITH our album, so a trailing `" - artist"` sails
+  straight through. Hence **`_stripArtistAffix`** (ported byte-identical from LBF 0.9.147 — sha
+  `447d1306`; port any change to both). Deliberately conservative: space-padded separator only (so
+  `Jay-Z` survives), the discarded side must EQUAL the artist under `_norm` (so `Album - aksfx
+  remixes` survives), anything else returned VERBATIM. A missed strip is a wart; a wrong strip
+  corrupts the key LL dedupes on.
+- **`&y=` (new).** The year is the third segment of LL's dedupe key, so a yearless row keys as
+  `artist|album|` and the same album added from a source that supplies a year becomes a second row
+  dedupe cannot see. PFR has **never** sent one (there was no year handling in this plugin at all).
+  Pitchfork states a REVIEW date, not a release date, so it comes from the matched service's own
+  album hash via **`_svcYear`** (ported from LBF; Qobuz `release_date_original`/`released_at` epoch,
+  Tidal `releaseDate`, Deezer `release_date`) — which is also the date the service reports at
+  playback. `''` when no service states one.
+- **Changes:** `_svcYear` + `_stripArtistAffix` added; all three search subs stash
+  `_svctitle`/`_year` beside `_albumid`; `_attachFavUrl` takes a 6th `$year` arg and the call site
+  passes `$it->{_svctitle}`/`$it->{_year}`. **No fallback at the call site** — with no service title
+  we send no `&al=` and LL reads Material's label, which is imperfect but never wrong, whereas the
+  wrong string is silently unmatchable. **Bandcamp is not involved** (never ported here).
+- **`pfr:stream:8→9`** — the favurl is frozen into the cached item. **Bump on ANY change to what the
+  favurl carries, even when the fields keep their shape**; one re-resolve beats a week of silent
+  misses aged out of a 7d TTL. (LBF needed four such bumps in one session for want of this rule.)
+- **Tests: new `tools/t_svctitle.pl`** — 22 checks against the REAL subs and the REAL `_norm`/`%FOLD`
+  chain, split into "must strip" / **"must not strip"** / year extraction. Anti-tested: removing the
+  strip fails 7, neutering `_svcYear` fails 3. `perl -c` clean (via throwaway stubs for the `Slim::*`
+  tree, which is absent on this Mac — see the note in Server/testing). No matcher change.
+
 ## Status: 0.7.9
 **0.7.9 (2026-07-29): fix — the settings checkbox was INVISIBLE in Material.**
 Fleet-wide (LBF 0.9.122, LL 0.1.73, Album-Booklet 0.1.3, here 0.7.9). Material's settings CSS gives a bare
@@ -357,6 +426,10 @@ but the form Listen Later replays cleanly is the explicit one below.)
   date/genre/capsule. So the favurl carries the clean pieces: `&a=<artist>` and (0.7.6) `&al=<album>`.
   Listen Later reads `&a=` as the artist fallback and PREFERS `&al=` over the `"Artist - Album"` label,
   then strips both. `?cover=` carries the native album art.
+- **0.7.10 SUPERSEDES the `&al=` SOURCE described below.** `&al=` now carries the MATCHED SERVICE's
+  album title (raw hash, artist affix stripped), not Pitchfork's, and the favurl also carries `&y=`.
+  The 0.7.6 reasoning about WHY the param exists is still correct; only the value changed. See
+  "Status: 0.7.10" for the rule and the two traps.
 - **Why `&al=` matters (0.7.6):** without it, Listen Later stored the album title WITH the artist prefixed
   ("Will Sheff - Extra Mile"). NOT cosmetic — it broke Listen Later's **Played auto-detection** (it keys on
   the album name, so the polluted title never matched the playing track's clean "Extra Mile") and showed
