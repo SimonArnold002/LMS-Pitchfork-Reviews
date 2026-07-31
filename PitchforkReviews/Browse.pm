@@ -691,7 +691,15 @@ sub _pluginIcon {
 sub _streamKey {
     my ($idPart) = @_;
     my $svcOrder = join(',', map { lc $_->{name} } _orderedAdapters());
-    my $key = 'pfr:stream:8:' . $svcOrder . ':' . ($idPart // '');   # :7: = favurl gains &al= (clean album for ListenLater); re-resolve so cached matches carry it
+    # :7: = favurl gains &al= (album title for ListenLater); :8: = fleet matcher sync (the
+    # decorative "!" fix changed match DECISIONS). :9: (0.7.10) = '&al=' now carries the
+    # MATCHED SERVICE's title rather than Pitchfork's, and the favurl gains '&y='. The
+    # favurl is frozen into the cached item, so without this bump every already-resolved
+    # review keeps handing ListenLater the old name for the full 7d TTL — and the symptom
+    # (a release that plays fine but never reaches Played) is silent, so it must not be
+    # left to age out. **Bump on ANY change to what the favurl carries, even when the
+    # fields keep their shape** — one re-resolve beats a week of silent misses.
+    my $key = 'pfr:stream:9:' . $svcOrder . ':' . ($idPart // '');
     utf8::encode($key) if utf8::is_utf8($key);   # octet key — non-Latin can't crash md5
     return $key;
 }
@@ -792,7 +800,13 @@ sub _findPlayable {
                 # ListenLater can't tell the service or replay the album. Same handshake
                 # the sibling plugin uses. (Cover rides ?cover=; artist rides &a= because
                 # Material sends these rows no $ARTISTNAME.)
-                _attachFavUrl($it, $svc, $it->{_cover}, $artist, $album);
+                # The album name and year come from the MATCHED SERVICE (`_svctitle`/`_year`,
+                # stashed from the raw album hash at match time), NOT from $album — which is
+                # Pitchfork's spelling of the title, and not what the service will report
+                # while the album plays. No fallback: with no service title we send no
+                # '&al=' and ListenLater reads Material's label, which is imperfect but
+                # never wrong, whereas the wrong string is silently unmatchable.
+                _attachFavUrl($it, $svc, $it->{_cover}, $artist, $it->{_svctitle}, $it->{_year});
             }
             $result[$i] = \@matched;
             $resolve->();
@@ -812,12 +826,67 @@ sub _findPlayable {
     }
 }
 
-# Cache matched items. Qobuz/Tidal/Deezer album nodes all carry a CODEREF url that
-# Storable can't serialise — stripped here, reattached per service on read by
-# _rebuildStreamItems (the album id rides `passthrough`, which survives the cache).
-# Guarded: Storable dies on unexpected nested refs and that must not stop the page.
+# A release YEAR from a streaming service's RAW album hash, for the '&y=' handshake.
+# Qobuz states the date on its album object (release_date_original / the released_at epoch);
+# Tidal and Deezer use releaseDate / release_date. Ported verbatim from the ListenBrainz
+# sibling — keep the two in step if a service adds a field. '' when nothing states one.
+sub _svcYear {
+    my (@hashes) = @_;
+    for my $h (@hashes) {
+        next unless ref $h eq 'HASH';
+        for my $k (qw(release_date_original release_date releaseDate date streamStartDate)) {
+            my $v = $h->{$k};
+            return $1 if defined $v && !ref $v && $v =~ /^(\d{4})/;
+        }
+        my $e = $h->{released_at};   # Qobuz epoch variant
+        if (defined $e && !ref $e && $e =~ /^\d{9,}$/) {
+            return (localtime($e))[5] + 1900;
+        }
+        return $1 if defined $h->{year} && !ref $h->{year} && $h->{year} =~ /^(\d{4})/;
+    }
+    return '';
+}
+
+# Strip an artist affix a service has joined onto its own album title, for '&al='.
+# Ported from ListenBrainz Fresh Releases 0.9.147, where a service's "title" field turned
+# out not to be the bare title on every service. The MATCHER never notices, because
+# _albumMatches accepts a candidate that STARTS WITH our album — so a trailing " - artist"
+# sails through matching while being wrong as a title.
+#
+# Deliberately conservative: the separator must be SPACE-PADDED (so `Jay-Z` is untouched),
+# the discarded side must EQUAL the artist under _norm (not merely contain it, so
+# "Album - aksfx remixes" is left alone), and anything failing either test is returned
+# VERBATIM — a missed strip is a cosmetic wart, a wrong strip corrupts the title Listen
+# Later matches and dedupes on. Prefix is tested at the FIRST separator and suffix at the
+# LAST, so a title containing its own " - " still resolves.
+#
+# PFR-ONLY presentation logic, outside the shared matcher — do NOT confuse it with
+# `_stripArtistPrefix`, which IS a fleet-synced shared-engine sub. This one does not trip
+# matcher_sync_check. Kept byte-identical to LBF's copy; port any change to both.
+sub _stripArtistAffix {
+    my ($title, $artist) = @_;
+    return $title unless defined $title  && !ref $title  && length $title;
+    return $title unless defined $artist && !ref $artist && length $artist;
+
+    my $an = _norm($artist);
+    return $title unless length $an;
+
+    # Hyphen-minus, the Unicode dash family (figure/en/em/horizontal bar) and minus sign.
+    my $dash = qr/\s+[-\x{2010}\x{2011}\x{2012}\x{2013}\x{2014}\x{2015}\x{2212}]\s+/;
+
+    if ($title =~ /^(.*?)$dash(.*)$/s) {          # first separator → "<artist> - <album>"
+        my ($lhs, $rhs) = ($1, $2);
+        return $rhs if length $rhs && _norm($lhs) eq $an;
+    }
+    if ($title =~ /^(.*)$dash(.*?)$/s) {          # last separator  → "<album> - <artist>"
+        my ($lhs, $rhs) = ($1, $2);
+        return $lhs if length $lhs && _norm($rhs) eq $an;
+    }
+    return $title;
+}
+
 # Decorate a matched streaming album with a ListenLater-friendly favorites_url:
-#   <scheme>://album:<nativeId>[?cover=<url-encoded art>][&a=<artist>][&al=<clean album>]
+#   <scheme>://album:<nativeId>[?cover=<art>][&a=<artist>][&al=<service album>][&y=<year>]
 # XMLBrowser copies an explicit $item->{favorites_url} into presetParams.favorites_url
 # (which Material exposes as $FAVURL) — without it the coderef `url` leaks as the favurl
 # and ListenLater sees a broken link with no service/id. ListenLater reads the scheme as
@@ -826,7 +895,7 @@ sub _findPlayable {
 # No native id → no favurl (the row still displays + plays here; it just can't be added
 # to ListenLater with full fidelity). Ported from ListenBrainz Fresh Releases.
 sub _attachFavUrl {
-    my ($it, $svc, $art, $artist, $album) = @_;
+    my ($it, $svc, $art, $artist, $album, $year) = @_;
     my $id = $it->{_albumid};
     return unless defined $id && length $id;
 
@@ -847,18 +916,45 @@ sub _attachFavUrl {
     # Our row label is "Artist - Album" (line1), and Material forces $ALBUMNAME/$TITLE to
     # that whole label for online items — so ListenLater would store the artist doubled into
     # the album title (breaking its list display AND its Played auto-detection, which keys on
-    # the album name). Pack the CLEAN album title as &al= (symmetric with &a=); ListenLater
+    # the album name). Pack the album title as &al= (symmetric with &a=); ListenLater
     # prefers it over the label, then strips it. Packed whenever we have a non-empty
     # album string, same idiom (and same defined/ref/length guard) as &a=.
+    #
+    # SEND THE MATCHED SERVICE'S TITLE, NOT PITCHFORK'S (0.7.10). By the time we build a
+    # favurl this review has been RESOLVED to a specific album on Qobuz/Tidal/Deezer, and
+    # from that point the SERVICE's spelling is the only one that works downstream: LL's
+    # Played auto-detection matches the PLAYING track's album title (which the service
+    # reports), and its artist|album|year dedupe key must agree with a direct add from that
+    # same service. Pitchfork's spelling and the service's differ often enough to matter —
+    # Pitchfork appends " EP"/" LP" that services drop (the `_stripFmt` fallback exists
+    # precisely because of it), so sending Pitchfork's name would leave releases unmatched
+    # at playback, SILENTLY: the album plays perfectly and just never reaches Played.
+    # The sibling ListenBrainz plugin shipped exactly that bug (its 0.9.144-0.9.147);
+    # `$album` here is now the service title, stripped of any artist affix — see the
+    # `_svctitle` stash in _searchQobuz/_searchTidal/_searchDeezer.
     if (defined $album && !ref $album && length $album) {
         require URI::Escape;
         push @params, 'al=' . URI::Escape::uri_escape_utf8($album);
+    }
+
+    # ...and the release YEAR as '&y=' (0.7.10). It is the third segment of ListenLater's
+    # artist|album|year dedupe key, so without one a saved row keys as "artist|album|" and
+    # the SAME album added from somewhere that supplies a year keys differently — a second
+    # row dedupe cannot see. Pitchfork states a review date, not a release date, so the year
+    # comes from the MATCHED SERVICE's own album data (_svcYear), which is the release date
+    # and is what the service will report while playing. Bare 4-digit, no escaping needed.
+    if (defined $year && !ref $year && $year =~ /^(\d{4})$/) {
+        push @params, 'y=' . $1;
     }
 
     $fav .= '?' . join('&', @params) if @params;
     $it->{favorites_url} = $fav;
 }
 
+# Cache matched items. Qobuz/Tidal/Deezer album nodes all carry a CODEREF url that
+# Storable can't serialise — stripped here, reattached per service on read by
+# _rebuildStreamItems (the album id rides `passthrough`, which survives the cache).
+# Guarded: Storable dies on unexpected nested refs and that must not stop the page.
 sub _cacheStream {
     my ($key, $items, $ttl) = @_;
     my @store = map { my %x = %$_; delete $x{url}; \%x } @$items;
@@ -952,6 +1048,15 @@ sub _searchQobuz {
                 next;
             }
             $item->{_albumid} = $album->{id};   # native id → ListenLater favurl (album:<id>)
+            # The SERVICE's own album title and release year, for the '&al='/'&y=' handshake
+            # (see _attachFavUrl). Taken from the RAW album hash — never from the rendered
+            # node, whose `name`/`line1` are that plugin's DISPLAY LABEL with the artist
+            # baked in (Qobuz renders it artist-first, Bandcamp artist-last), which is what
+            # broke the sibling plugin. `title` is the same field _albumMatches validated
+            # above, with any artist affix the service joined on removed, compared against
+            # the SERVICE's artist spelling ($candArtist) rather than Pitchfork's.
+            $item->{_svctitle} = _stripArtistAffix($album->{title}, $candArtist);
+            $item->{_year}     = _svcYear($album);
             push @out, $item;
         }
         return $collect->(undef) if !@out && $rendererFailed;
@@ -983,6 +1088,15 @@ sub _searchTidal {
                 next;
             }
             $item->{_albumid} = $album->{id};   # native id → ListenLater favurl (album:<id>)
+            # The SERVICE's own album title and release year, for the '&al='/'&y=' handshake
+            # (see _attachFavUrl). Taken from the RAW album hash — never from the rendered
+            # node, whose `name`/`line1` are that plugin's DISPLAY LABEL with the artist
+            # baked in (Qobuz renders it artist-first, Bandcamp artist-last), which is what
+            # broke the sibling plugin. `title` is the same field _albumMatches validated
+            # above, with any artist affix the service joined on removed, compared against
+            # the SERVICE's artist spelling ($candArtist) rather than Pitchfork's.
+            $item->{_svctitle} = _stripArtistAffix($album->{title}, $candArtist);
+            $item->{_year}     = _svcYear($album);
             push @out, $item;
         }
         return $collect->(undef) if !@out && $rendererFailed;
@@ -1021,6 +1135,15 @@ sub _searchDeezer {
                 next;
             }
             $item->{_albumid} = $album->{id};   # native id → ListenLater favurl (album:<id>)
+            # The SERVICE's own album title and release year, for the '&al='/'&y=' handshake
+            # (see _attachFavUrl). Taken from the RAW album hash — never from the rendered
+            # node, whose `name`/`line1` are that plugin's DISPLAY LABEL with the artist
+            # baked in (Qobuz renders it artist-first, Bandcamp artist-last), which is what
+            # broke the sibling plugin. `title` is the same field _albumMatches validated
+            # above, with any artist affix the service joined on removed, compared against
+            # the SERVICE's artist spelling ($candArtist) rather than Pitchfork's.
+            $item->{_svctitle} = _stripArtistAffix($album->{title}, $candArtist);
+            $item->{_year}     = _svcYear($album);
             push @out, $item;
         }
         return $collect->(undef) if !@out && $rendererFailed;
