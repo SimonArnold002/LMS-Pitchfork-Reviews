@@ -1,92 +1,123 @@
 PLUGIN_PITCHFORKREVIEWS
 	EN	Pitchfork Reviews
+	NL	Pitchfork Reviews 
 
 PLUGIN_PITCHFORKREVIEWS_DESC
 	EN	Browse album reviews from Pitchfork and play the reviewed album from your streaming library.
+	NL	Blader door album reviews van Pitchfork en speel af via streaming service.
 
 PLUGIN_PITCHFORKREVIEWS_BNM
 	EN	Best New Music
+	NL	Beste Nieuwe Muziek
 
 PLUGIN_PITCHFORKREVIEWS_REVIEWS
 	EN	Latest Reviews
+	NL	Laatste Reviews
 
 PLUGIN_PITCHFORKREVIEWS_HSA
 	EN	High Scoring Albums
+	NL	Hoog Gewaardeerde Albums
 
 PLUGIN_PITCHFORKREVIEWS_HOME_BNM
 	EN	Pitchfork: Best New Music
+	NL	Pitchfork: Beste Nieuwe Muziek
 
 PLUGIN_PITCHFORKREVIEWS_HOME_HSA
 	EN	Pitchfork: High Scoring Albums
+	NL	Pitchfork: Hoog Gewaardeerde Albums
 
 PLUGIN_PITCHFORKREVIEWS_HOME_REVIEWS
 	EN	Pitchfork: Latest Reviews
+	NL	Pitchfork: Laatste Reviews
 
 PLUGIN_PITCHFORKREVIEWS_SETTINGS
 	EN	Plugin Settings
+	NL	Plug-in Instellingen
 
 PLUGIN_PITCHFORKREVIEWS_REFRESH
 	EN	Refresh (force update now)
+	NL	Vernieuwen (forceer nu een update)
 
 PLUGIN_PITCHFORKREVIEWS_EMPTY
 	EN	No reviews found (check the feed URL in the log)
+	NL	Geen reviews gevonden (check de feed URL in log info)
 
 PLUGIN_PITCHFORKREVIEWS_READ_REVIEW
 	EN	Read the full review
+	NL	Lees de volledige review
 
 PLUGIN_PITCHFORKREVIEWS_REFRESH_MATCH
 	EN	Refresh streaming match
+	NL	Ververs streaming match
 
 PLUGIN_PITCHFORKREVIEWS_WEEK_OF
 	EN	Week of
+	NL	Week van
 
 PLUGIN_PITCHFORKREVIEWS_WEEK
 	EN	Recent reviews
+	NL	Recente reviews
 
 PLUGIN_PITCHFORKREVIEWS_NO_MATCH
 	EN	No streaming match found
+	NL	Geen streaming match gevonden
 
 PLUGIN_PITCHFORKREVIEWS_GENRE
 	EN	Genre
+	NL	Genre
 
 PLUGIN_PITCHFORKREVIEWS_SERVICES
 	EN	Streaming Services
+	NL	Streaming Services
 
 PLUGIN_PITCHFORKREVIEWS_GENERAL
 	EN	General
+	NL	Algemeen
 
 PLUGIN_PITCHFORKREVIEWS_SVC_PRIORITY
 	EN	Search priority
+	NL	Zoek prioriteit
 
 PLUGIN_PITCHFORKREVIEWS_SVC_PRIORITY_DESC
 	EN	Lower number = searched first. 0 = never search this service. The album resolver stops at the first service that has a match.
+	NL	Lager nummer = eerst gezocht. 0 = gebruik deze service niet. Het zoeken naar albums stopt als er een match is.
 
 PLUGIN_PITCHFORKREVIEWS_SVC_DETECTED
 	EN	installed
+	NL	geïnstalleerd
 
 PLUGIN_PITCHFORKREVIEWS_SVC_NOT_DETECTED
 	EN	not installed
+	NL	niet geïnstalleerd
 
 PLUGIN_PITCHFORKREVIEWS_GROUP_BY
 	EN	Group Latest Reviews by
+	NL	Groepeer laatste reviews op
 
 PLUGIN_PITCHFORKREVIEWS_GROUP_BY_DESC
 	EN	How the Latest Reviews list is divided. By date keeps the weekly dividers (newest first). By genre groups reviews under their Pitchfork genre — newest first within each genre, and the genre with the most recent review leads. (Best New Music stays a flat curated list.)
+	NL	Bepaal de indeling van de lijst met recente recensies: bij 'Datum' blijven de wekelijkse scheidingslijnen behouden (nieuwste eerst). Bij 'Genre' worden recensies gegroepeerd volgens hun Pitchfork-genre – binnen elk genre staan ​​de nieuwste bovenaan, en het genre met de meest recente recensie staat vooraan. 'Beste Nieuwe Muziek' wordt niet gescheiden.
 
 PLUGIN_PITCHFORKREVIEWS_GROUP_BY_DATE
 	EN	Date (weekly)
+	NL	Datum (wekelijks)
 
 PLUGIN_PITCHFORKREVIEWS_GROUP_BY_GENRE
 	EN	Genre
+	NL	Genre
 
 PLUGIN_PITCHFORKREVIEWS_GENRE_OTHER
 	EN	Other
+	NL	Overig
 
 PLUGIN_PITCHFORKREVIEWS_ENABLED
 	EN	Enabled
+	NL	Ingeschakeld
 
 PLUGIN_PITCHFORKREVIEWS_DEBUG_LOG
 	EN	Extra debug logging
+	NL	Extra debug log info
 
 PLUGIN_PITCHFORKREVIEWS_DEBUG_LOG_DESC
 	EN	Also write the resolver timeline to a dedicated pfr-debug.log beside server.log (size-capped, one rotation). The same lines always go to server.log at INFO too. Turn on to diagnose a match or feed problem, off again after.
+	NL	Schrijf de tijdlijn ook naar een apart pfr-debug.log-bestand naast server.log (met een limiet op de bestandsgrootte en één rotatie). Dezelfde regels worden ook altijd op INFO-niveau naar server.log geschreven. Schakel dit in om problemen met matches of feeds te diagnosticeren.
