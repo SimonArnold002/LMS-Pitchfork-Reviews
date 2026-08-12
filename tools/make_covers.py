@@ -29,6 +29,7 @@ TILES = {
     "menu-best-new-music.png": "Best New Music",
     "menu-high-scoring-albums.png": "High Scoring Albums",
     "menu-latest-reviews.png": "Latest Reviews",
+    "menu-best-albums-of-the-year.png": "Best Albums of the Year",
 }
 
 
