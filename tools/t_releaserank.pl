@@ -93,7 +93,15 @@ sub adapters_returning {
             run  => sub {
                 my ($client, $query, $an, $bn, $svc, $collect) = @_;
                 push @QUERIES, { svc => $svc, query => $query };
-                $collect->(shift @plan);
+                my $next = shift @plan;
+                # The two shapes that never reach $collect at all, which is the whole point
+                # of the timeout/throw cases below: 'HANG' = the service takes the query and
+                # never calls back, so only its watchdog can settle the leg; 'DIE' = the
+                # adapter throws inside $runLeg's eval. A plain undef still CALLS BACK with
+                # undef and is a different path (the service answered "couldn't query").
+                return              if defined $next && !ref $next && $next eq 'HANG';
+                die "adapter blew up\n" if defined $next && !ref $next && $next eq 'DIE';
+                $collect->($next);
             },
         };
     }
@@ -102,13 +110,23 @@ sub adapters_returning {
 my @ADAPTERS;
 { no warnings 'redefine'; *Plugins::PitchforkReviews::Browse::_orderedAdapters = sub { @ADAPTERS }; }
 
+my $GOT;
 sub resolve {
     my ($artist, $album, %svc) = @_;
     @QUERIES  = ();
     @ADAPTERS = adapters_returning(%svc);
-    my $got;
-    $B->can('_findPlayable')->(undef, sub { $got = $_[0] }, $artist, $album);
-    return $got;
+    @Slim::Utils::Timers::armed = ();
+    $GOT = undef;
+    $B->can('_findPlayable')->(undef, sub { $GOT = $_[0] }, $artist, $album);
+    return $GOT;
+}
+# Fire the watchdog the last $runLeg armed. The stub setTimer only RECORDS the callback,
+# so a hung leg leaves the resolve unanswered until this runs it — which is exactly what
+# STREAM_SVC_TIMEOUT does on the server.
+sub fire_watchdog {
+    my $cb = $Slim::Utils::Timers::armed[-1] or die "no timer armed\n";
+    $cb->();
+    return $GOT;
 }
 sub titles  { my $r = shift; map { $_->{_svctitle} // '' } @{ $r->{items} || [] } }
 sub queries { map { $_->{query} } @QUERIES }
@@ -240,6 +258,43 @@ print "\n3. the album-title retry — positive evidence only\n";
     # must not be reported as inconclusive and lose them.
     my $r = resolve('Interpol', $ALBUM, Qobuz => { script => [ [ cand($SINGLE) ], undef ] });
     is('leg 1 survives an undef leg 2', (titles($r))[0], $SINGLE);
+}
+{
+    # THE LEG-2 WATCHDOG, which is the path the merge was originally on the wrong side of.
+    # $runLeg's timer calls $finish DIRECTLY — $collect, where the @leg1 merge used to
+    # live, is never reached — so a leg-2 timeout reported the service inconclusive and
+    # threw away matches leg 1 was already holding. Since 0.9.27 fires leg 2 on a
+    # LOOSE-ONLY leg 1, that is the ordinary case, not an edge one: the Interpol single
+    # would be dropped and the album cached as a no-match for STREAM_INCONCLUSIVE_TTL.
+    my $r = resolve('Interpol', $ALBUM, Qobuz => { script => [ [ cand($SINGLE) ], 'HANG' ] });
+    ok('a hung leg 2 leaves the resolve unanswered', !defined $r);
+    is('two legs were run before the hang', scalar(queries()), 2);
+    $r = fire_watchdog();
+    is('leg 1 survives a leg-2 TIMEOUT', (titles($r))[0], $SINGLE);
+}
+{
+    # Same defect through $runLeg's other direct-to-$finish path: the adapter throws and
+    # the eval turns it into $finish->(undef).
+    my $r = resolve('Interpol', $ALBUM, Qobuz => { script => [ [ cand($SINGLE) ], 'DIE' ] });
+    is('leg 1 survives a leg-2 THROW', (titles($r))[0], $SINGLE);
+}
+{
+    # THE OTHER DIRECTION, and the reason the fallback is gated on `@leg1` rather than
+    # applied unconditionally: with nothing held, a timeout is still INCONCLUSIVE. Turning
+    # it into a no-match would cache the miss for the long TTL instead of the short one.
+    my $r = resolve('Interpol', $ALBUM, Qobuz => { script => [ 'HANG' ] });
+    ok('a hung leg 1 leaves the resolve unanswered', !defined $r);
+    $r = fire_watchdog();
+    is('a leg-1 timeout holding nothing still reports no match',
+        $r->{items}[0]{name}, 'PLUGIN_PITCHFORKREVIEWS_NO_MATCH');
+}
+{
+    # A leg-2 timeout on an EMPTY leg 1 (the 0.7.12 recall case) has nothing to fall back
+    # to and must stay inconclusive as well.
+    my $r = resolve('Interpol', $ALBUM, Qobuz => { script => [ [], 'HANG' ] });
+    $r = fire_watchdog();
+    is('an empty leg 1 + leg-2 timeout still reports no match',
+        $r->{items}[0]{name}, 'PLUGIN_PITCHFORKREVIEWS_NO_MATCH');
 }
 {
     my $r = resolve('Interpol', $ALBUM, Qobuz => { script => [ [ cand($SINGLE) ], [ cand($ALBUM) ] ] });

@@ -3127,20 +3127,44 @@ sub _findPlayable {
 
         my $settled = 0;
         my $svcTimer;
+        # Leg 1's matches, held while the album-title leg runs (see $collect). Declared
+        # HERE, above $finish, because the fallback that consumes them belongs in $finish:
+        # that is the ONE funnel every outcome passes through, including the two $runLeg
+        # writes ($collect never sees a watchdog or a throw).
+        my @leg1;
         my $finish  = sub {
             return if $settled || $resolved;
             $settled = 1;
             Slim::Utils::Timers::killSpecific($svcTimer) if $svcTimer;
+            my $res = $_[0];
+            # MERGE, NEVER REPLACE. Leg 1's matches are real — they passed the same
+            # `_albumMatches` gate — and the title query is a different search with its own
+            # recall, so it can legitimately return FEWER rows than the artist query did,
+            # or none, or nothing at all. Replacing would turn a loose-but-correct match
+            # into a no-match whenever leg 2 missed, which is a regression on every title
+            # this leg was not built for.
+            # Leg 2 leads because that is where the exact candidate is expected; the
+            # promotion in $resolve then decides, and `_dedupeStreamItems` collapses the
+            # rows both legs returned.
+            # THIS MUST LIVE IN $finish, NOT IN $collect. $runLeg's watchdog and its eval
+            # failure branch call $finish DIRECTLY — $collect is the adapter's callback and
+            # is never reached when leg 2 times out or throws. With the merge in $collect,
+            # a leg-2 timeout dropped the matches leg 1 was holding and answered
+            # inconclusive; and 0.9.27 fires leg 2 on a LOOSE-ONLY leg 1, so those held
+            # matches are the common case, not an edge one.
+            if (@leg1) {
+                $res = (defined $res && ref $res eq 'ARRAY') ? [ @$res, @leg1 ] : [ @leg1 ];
+            }
             # undef = couldn't query the service (no handler / timeout / error /
             # broken renderer) -> inconclusive (short-TTL retry), not a real miss.
-            if (!defined $_[0]) {
+            if (!defined $res) {
                 $inconclusive++;
                 $result[$i] = [];
                 $resolve->();
                 $fanOut->();
                 return;
             }
-            my @matched = (ref $_[0] eq 'ARRAY') ? @{ $_[0] } : ();
+            my @matched = (ref $res eq 'ARRAY') ? @$res : ();
             for my $it (@matched) {
                 $it->{_cover} = $it->{image} if defined $it->{image};   # native album cover (for list rows)
                 $it->{image}  = $icon if $icon;   # service logo as the detail-row thumbnail
@@ -3195,7 +3219,6 @@ sub _findPlayable {
         # (LBF 0.9.95). The thin wrapper handed to $runLeg captures $self but is not
         # captured BY it, so nothing points back at itself.
         my $legs = 0;
-        my @leg1;
         my $collect = sub {
             my ($self, $res) = @_;
             return if $settled || $resolved;
@@ -3225,18 +3248,8 @@ sub _findPlayable {
                 $runLeg->($qaChars, $qaBytes, 'album', sub { $self->($self, @_) });
                 return;
             }
-            # MERGE, NEVER REPLACE. Leg 1's matches are real — they passed the same
-            # `_albumMatches` gate — and the title query is a different search with its own
-            # recall, so it can legitimately return FEWER rows than the artist query did.
-            # Replacing would turn a loose-but-correct match into a no-match whenever leg 2
-            # missed, which is a regression on every title this leg was not built for.
-            # Leg 2 leads because that is where the exact candidate is expected; the
-            # promotion above then decides, and `_dedupeStreamItems` in $resolve collapses
-            # the rows both legs returned. An undef leg 2 (service unqueryable) falls back
-            # to leg 1 rather than reporting inconclusive — we are holding real matches.
-            if (@leg1) {
-                $res = (defined $res && ref $res eq 'ARRAY') ? [ @$res, @leg1 ] : [ @leg1 ];
-            }
+            # $finish merges @leg1 back in — every outcome, including a leg-2 watchdog or
+            # throw, has to get that fallback and only $finish sees them all.
             $finish->($res);
         };
 

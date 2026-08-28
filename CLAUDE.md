@@ -66,6 +66,17 @@ does not cover. Say which ledger entry you are challenging and what changed.
   nobody agrees about bins correct EP matches. **Release type may still be used to
   decide what to OFFER, never what to DROP** — that door is open (it is the residual
   gap `_releaseAlts` documents), a filter is not.
+- **The Refresh row is NOT defeated by a captured closure (withdrawn 0.9.28).** Raised as
+  plausible: the row is injected into a feed served by a closure that captured `@intro` and
+  `$inner`, so `nextWindow => 'refresh'` looked like it would redraw the same stale rows.
+  XMLBrowser does have that trap — `$subFeed->{fetched}` replays a level instead of
+  re-invoking its `url` coderef — but it **cannot fire here**: a sid is minted only at the
+  top level and only when no top-level item has a coderef `url` (*"Don't cache if list has
+  coderefs"*), and PFR's top level is coderef-driven throughout, so no `xmlbrowser_$sid`
+  ever exists and the tree is rebuilt from `topLevel` down on every request. Proven live by
+  tapping the group toggle (`item_id 2.2`) and re-requesting `2`: both the row label and the
+  divider changed. **`forceRefresh` is not needed and is used nowhere in the fleet.** Full
+  reasoning in `docs/code-review-0.9.28.md`; memory note `xmlbrowser-no-session-cache`.
 - **The Qobuz search payload's `release_type` availability is UNVERIFIED.**
   `_precacheAlbum` does not delete the field and the plugin reads it elsewhere, but
   nothing confirms `catalog/search` sends it, and the API needs auth so it cannot be
@@ -76,7 +87,7 @@ does not cover. Say which ledger entry you are challenging and what changed.
 ### C. CLOSED FINDINGS
 
 Fixed findings are recorded per review in `docs/code-review-<version>.md`
-(0.9.22 → 0.9.26) and in the Status sections below, each with its mechanism and
+(0.9.22 → 0.9.26, 0.9.28) and in the Status sections below, each with its mechanism and
 its test. The whole 0.9.22–0.9.26 series is closed. Do not re-derive it.
 
 ### D. ADDING TO THIS LEDGER
@@ -168,6 +179,87 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 0.9.28
+**A code-review fix: a slow streaming service could throw away a match the plugin had
+already found. Plus one finding withdrawn after being tested against the live server.**
+
+### The defect (review finding 1)
+
+0.9.27's headline change — the album-title retry now fires on a **loose-only** leg 1, not
+only an empty one — had a consequence its own merge logic anticipated but put in the wrong
+place. Because the retry now runs when leg 1 matched *something*, **leg 1 is routinely
+holding real matches while leg 2 is in flight**, where before it was holding nothing.
+
+`$collect` stashed those in `@leg1` and merged them back, so leg 2 could never replace a
+good answer with a worse one. But `$runLeg` arms a fresh watchdog per leg and catches the
+adapter's throw, and **both of those paths call `$finish->(undef)` directly** — `$collect`
+is the adapter's callback and is never reached when leg 2 times out or dies. An 8-second
+`STREAM_SVC_TIMEOUT` on the title query therefore discarded the matches the artist query had
+already found, counted the service `inconclusive`, and answered "No match".
+
+Not an edge case: it needs only one slow search on a review that resolved loosely, which
+after 0.9.27 is the ordinary shape of a two-leg resolve.
+
+### The fix
+
+`@leg1` is declared above `$finish` and the merge moves **into** `$finish` — the one funnel
+every outcome passes through. `$finish` rewrites its argument into a lexical `$res` and
+merges before the `!defined` inconclusive branch; `$collect` simply calls `$finish->($res)`.
+
+Semantics are unchanged: leg 2 still leads, `$resolve`'s promotion still decides,
+`_dedupeStreamItems` still collapses the overlap. The fallback stays **gated on `@leg1`
+being non-empty**, so a timeout holding nothing is still `inconclusive` on the 1-hour TTL
+rather than being promoted into a 1-day confirmed miss.
+
+### The finding that was withdrawn (review finding 2)
+
+The unconditional Refresh row was flagged as possibly inert — it is injected into a feed
+served by a closure that captured `@intro` and `$inner`, so a `nextWindow => 'refresh'`
+looked like it would redraw the identical stale rows. **It does not.** XMLBrowser mints a
+session cache only when no top-level item has a coderef `url`, and PFR's top level is
+coderef-driven throughout, so the tree is rebuilt from `topLevel` down on every request.
+Proven live, not inferred. See ledger entry B and `docs/code-review-0.9.28.md`.
+
+### Scope
+
+**NO CACHE BUMP, and it is checked rather than assumed.** The fixed path only ever wrote an
+`inconclusive` empty result, which carries `STREAM_INCONCLUSIVE_TTL` (3600s) and self-heals
+within the hour — nothing stored under the old behaviour is *wrong*, only briefly missing.
+`STREAM_KEY_VERSION` stays at **22** and `PARSE_VERSION` at **3**.
+
+**No matcher change.** The fix is entirely inside `_findPlayable`'s per-adapter closures —
+PFR call-site logic, outside the shared engine. `matcher_sync_check.py` is unaffected and
+still reports the same pre-existing DSC drift.
+
+**BUILT AND PACKAGED at 0.9.28.** `install.xml` and `repo.xml` both say 0.9.28, the zip is
+rebuilt (26 files, 485,756 bytes) and `repo.xml <sha>` recomputed to
+`8097c4c5f1c17512f90a7cac4fcdbe41a4d6a1e4`. Verified against the zip on disk rather than
+assumed: the zip's `Browse.pm` is byte-identical to the tree, carries the fix, and still
+reads `STREAM_KEY_VERSION => 22`. `README.html`/`index.html` regenerated so the version
+badge (read live from `install.xml`) is not left lying; `README.md` and `CHANGELOG.md` are
+deliberately untouched — those are written at the merge to main.
+
+### Tests
+
+**924 → 931 across twelve suites, 0 failures.** Only `t_releaserank` moved (50 → 57).
+
+The new coverage is the timeout path, which had none. `t_releaserank`'s adapter stub gained
+two shapes that never call back — `'HANG'` (the service goes quiet, so only its watchdog can
+settle the leg) and `'DIE'` (throws inside `$runLeg`'s `eval`) — plus `fire_watchdog()`,
+which runs the callback the stub `setTimer` recorded. Three assertions cover the fix and
+four the guard direction (a leg-1 timeout, and an empty leg 1 followed by a leg-2 timeout,
+must both still report no match).
+
+**The tests were confirmed to discriminate**, which is the point of adding them: run against
+the pre-fix `Browse.pm` via `PFR_BROWSE`, exactly the two new fix assertions fail
+(`leg 1 survives a leg-2 TIMEOUT`, `leg 1 survives a leg-2 THROW`) and the other five pass.
+
+### Field state
+
+0.9.27 verified correct on the live server during this pass: `Latest Reviews → Interpol`
+resolves to `qobuz://album:f06v4yh3txcxt`, the 12-track album, with the 2-track single
+demoted to an "Another release with this name" row and Refresh reachable beneath it.
 
 ## Status: 0.9.27
 **A review stopped resolving to a like-named single, and a matched row can be corrected
