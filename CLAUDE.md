@@ -263,6 +263,12 @@ against the zip on disk rather than assumed, and the zip's own `Browse.pm` check
 (read live from `install.xml`) is not left lying; `README.md` and `CHANGELOG.md` are
 deliberately untouched — those are written at the merge to main.
 
+**CONFIRMED IN THE FIELD** (2026-08-28, installed on plex): the Interpol review resolves to
+the 12-track album, the 2-track single is offered beneath it, and the Refresh row is
+reachable from the matched row. So this is a verified fix, not an inferred one — which
+matters because the whole defect was silent (the row played, it just played the wrong
+record) and nothing in a log would have reported it either way.
+
 ### Tests
 
 **851 → 924 across TWELVE suites, 0 failures** (was 851/11). New `tools/t_releaserank.pl`
