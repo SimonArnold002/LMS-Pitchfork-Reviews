@@ -163,7 +163,7 @@ use constant STREAM_KEY_PREFIX       => 'pfr:stream:';
 # asked for, and would read as "the limit did nothing". Compare against the 0.9.15
 # baseline — median 2513ms, raw median 83 — using searches at least five minutes apart,
 # and that also means no cache clearing is needed to get a cold run: just wait.
-use constant STREAM_KEY_VERSION      => 21;
+use constant STREAM_KEY_VERSION      => 22;
 
 # How long a coalescing slot may be joined before it is assumed wedged (see
 # _findPlayable). Comfortably past the worst honest resolve — four serial
@@ -1389,6 +1389,11 @@ sub _resolveSection {
                 if (@order) {
                     $it->{_album} = $bySide{ $order[0] };
                     my @alt = map { $bySide{$_} } @order[1 .. $#order];
+                    # ORDINARY REVIEWS ALSO OFFER A GENUINELY DIFFERENT RELEASE (0.9.27).
+                    # Only when there is ONE side: a combined review's alts already mean
+                    # "the review also covers this", and mixing the two claims on one page
+                    # would make neither readable.
+                    push @alt, _releaseAlts($it->{_album}, $res) if @order == 1;
                     $it->{_alt} = \@alt if @alt;
                 }
                 $active--;
@@ -1536,10 +1541,11 @@ sub _attachReviewLink {
 
     my $link    = $it->{link}    // '';
     my $capsule = $it->{capsule} // '';
-    # Nothing to add — leave the node alone. The alt-album test belongs here too: a
-    # combined review with no capsule and no link still has a second album to surface,
-    # and dropping out above would put it out of reach.
-    return unless length($link) || length($capsule) || @{ $it->{_alt} || [] };
+    # NO EARLY RETURN ANY MORE (0.9.27). It used to be "nothing to add, leave the node
+    # alone", widened once already for the alt-album case. The Refresh row is now
+    # unconditional and this sub is only ever called on a MATCHED row, so there is always
+    # something to add — and a row with no capsule and no link is precisely the one most
+    # likely to have matched something odd, i.e. the one that most needs the way out.
 
     my $inner = $row->{url};                              # service tracklist coderef (QobuzGetTracks / getAlbum)
     my @intro;
@@ -1567,12 +1573,21 @@ sub _attachReviewLink {
     # node's own name/line1/line2 all get it, because Material prefers whichever the
     # service happened to set.
     for my $alt (@{ $it->{_alt} || [] }) {
-        my %a     = %$alt;
-        my $title = $a{_sidetitle} // $a{name} // '';
+        my %a  = %$alt;
+        # TWO KINDS OF ALT, TWO DIFFERENT CLAIMS, and they must not share a label. A
+        # combined-review side IS covered by the review, and is named with PITCHFORK's side
+        # title because the review is the thing being read. A `release` alt is the opposite:
+        # the review is about ONE record, and this row exists to say the service carries
+        # another one under a similar name — so it is named with the SERVICE's own title
+        # (`_svctitle`, artist affix already stripped), which is the only honest label for
+        # it and the string the reader needs in order to tell the two rows apart.
+        my $rel   = ($a{_altkind} // '') eq 'release';
+        my $title = ($rel ? $a{_svctitle} : $a{_sidetitle}) // $a{name} // '';
         my $lbl   = length($it->{artist} // '') ? "$it->{artist} - $title" : $title;
         $a{name}  = $lbl;
         $a{line1} = $lbl;
-        $a{line2} = cstring($client, 'PLUGIN_PITCHFORKREVIEWS_ALSO_REVIEWED');
+        $a{line2} = cstring($client, $rel ? 'PLUGIN_PITCHFORKREVIEWS_ALSO_RELEASED'
+                                          : 'PLUGIN_PITCHFORKREVIEWS_ALSO_REVIEWED');
         $a{image} = _fitCover($a{_cover} || $a{image}) || DIVIDER_ICON;
         # STRIP THE DIRECT-PLAY AFFORDANCES, because this node is being injected into a
         # PLAYABLE container. The invariant stated at the top of this sub — every injected
@@ -1587,6 +1602,17 @@ sub _attachReviewLink {
         delete @a{ qw(play playlist on_select) };
         push @intro, \%a;
     }
+
+    # REFRESH IS REACHABLE FROM A MATCHED ROW AT LAST (0.9.27). `reviewDetail` has carried
+    # this row since 0.8.4, and a matched row has never been able to reach it — the drill-in
+    # is the service's tracklist, so the one surface that can correct a bad match was
+    # available only to rows that had nothing to correct. With STREAM_FOUND_TTL at 30 days
+    # that made a wrong match effectively permanent.
+    #
+    # It sits BELOW the alternatives on purpose: the rows above are the cheap fix (tap the
+    # right release), and re-searching is what you do when none of them is right. Non-audio
+    # like everything else here, so the container stays playable.
+    push @intro, _refreshMatchRow($client, $it);
 
     push @intro, { name => "\x{a0}", type => 'text' };    # blank row → gap separating the review from the tracks
 
@@ -2371,6 +2397,16 @@ sub _streamKey {
     # yield is ever exercised and the fix cannot be confirmed. The listing/bnm/hsa and
     # year keys are bumped alongside this one; a partial bump would leave the articles
     # cached and only half-reproduce first boot.
+    # :22: (0.9.27) — a CORRECTNESS bump, and one that must not be skipped. Candidate
+    # RANKING changed (an exact title now takes the row) and the retry leg now fires on a
+    # loose-only result, so a stored answer under :21: can name the wrong release —
+    # Interpol's *This Mirror Weighs a Ton* resolved to the 2-track single of the same
+    # name. That answer is cached under STREAM_FOUND_TTL, which is THIRTY DAYS, and the
+    # symptom is silent: the row plays, it just plays a different record. Nothing else
+    # invalidates it — the favurl even carries the single's title, so Listen Later would
+    # keep the wrong name too. `PARSE_VERSION` stays at 3: no article parsing changed, so
+    # re-downloading them would be cost with no test value.
+    #
     # :19: (0.9.19) — a CORRECTNESS bump, unlike the last two. Unpadded slashes now split
     # (all-or-nothing), so every title of the `EP/EP2` shape has a stored answer under
     # :18: that is wrong — a no-match cached under STREAM_NOMATCH_TTL, which would keep
@@ -2532,12 +2568,164 @@ sub _matchExactness {
     return _norm($svc) eq _norm($album) ? 'exact' : 'loose';
 }
 
+# Bracketed fragments that name an EDITION of a record rather than a different record.
+# A CLOSED LIST ON PURPOSE, and it fails toward OFFERING: anything not recognised is
+# treated as part of the release's identity, so an unknown bracket makes two titles
+# DISTINCT — which at worst shows one row too many, where the opposite error silently
+# hides the release the reader was looking for.
+my $EDITION_RE = qr/\b(?:deluxe|remaster(?:ed)?|expanded|anniversary|edition|version
+                      |explicit|clean|bonus|reissue|special|mono|stereo|hi.?res)\b/xi;
+
+sub _editionish { my ($s) = @_; return defined $s && $s =~ $EDITION_RE ? 1 : 0 }
+
+# The RELEASE IDENTITY of a title — `_norm`, but with bracketed content handled by what it
+# MEANS rather than by the fact that it is bracketed.
+#
+# `_norm` deletes every parenthesised group (`s/[\(\[].*?[\)\]]//g`), and that is right for
+# the job it was written for: "Foo (Deluxe Edition)" and "Foo (Remastered)" ARE the album,
+# and 0.9.21 pins exactly that. But the same rule collapses things that are NOT the same
+# record, and the EP direction is full of them — Djrum's *I Wander* EP sits on Deezer beside
+# the one-track singles *I Wander (III)* and *I Wander (IV + V)*, all three admitted by
+# `_albumMatches`, all three identical under `_norm`. Rank on `_norm` alone and a 6-track EP
+# loses its own row to a single on nothing but service ordering.
+#
+# So: an edition qualifier is dropped, anything else inside brackets is UNBRACKETED and kept
+# as part of the title. "I Wander (III)" -> "i wander iii"; "Foo (Deluxe Edition)" -> "foo".
+# The trailing EP/LP fold rides along (see _exactFolded) because Pitchfork writes "<name> EP"
+# where every service writes "<name>".
+sub _releaseKey {
+    my ($t) = @_;
+    return '' unless defined $t && !ref $t;
+    $t =~ s/[\(\[]([^\)\]]*)[\)\]]/_editionish($1) ? ' ' : " $1 "/ge;
+    return _stripFmt(_norm($t));
+}
+
+# EXACT WITH THE FORMAT DESCRIPTOR FOLDED — a SEPARATE test from _matchExactness above,
+# and the separation is deliberate rather than duplication.
+#
+# `_matchExactness` is load-bearing for 0.9.21's unpadded-split rule, where STRICTNESS is
+# the entire point: a fragment can only ever win through a looser tier, so anything that
+# widens "exact" widens what a fragment can pass as. This one is used only to RANK
+# candidates that have already been admitted by `_albumMatches`, where the question is a
+# different one — "is this the record the review is about, or another release that merely
+# starts with the same words?"
+#
+# WHY THE FOLD IS REQUIRED HERE, from live data. Pitchfork titles an EP "<name> EP" and the
+# services drop the suffix, which is the whole reason `_stripFmt` exists in the matcher. So
+# a review of an EP can NEVER produce a strict-exact match:
+#
+#     Djrum - I Wander EP      -> Qobuz/Deezer "I Wander"     strict: loose   folded: EXACT
+#     Faith Leazae - Faith EP  -> Deezer "Faith"              strict: loose   folded: EXACT
+#     Interpol - This Mirror…  -> "This Mirror…/See Out Loud"  strict+folded: LOOSE
+#     Djrum - I Wander EP      -> Deezer "I Wander (III)"      folded: LOOSE  (via _releaseKey)
+#
+# Rank on the strict test and every EP review is permanently "nothing matched exactly",
+# which turns the retry leg in `_findPlayable` into a per-EP-review tax AND invites the
+# promotion below to prefer a like-named ALBUM over the correct EP. Folding both sides
+# separates the shapes cleanly: the EP cases settle, the two rival shapes do not.
+sub _exactFolded {
+    my ($album, $item) = @_;
+    return 0 unless ref $item eq 'HASH';
+    my $svc = $item->{_svctitle};
+    return 0 unless defined $svc && !ref $svc && length $svc;
+    my $a = _releaseKey($album);
+    return 0 unless length $a;
+    return _releaseKey($svc) eq $a ? 1 : 0;
+}
+
+# Is a second search on the ALBUM TITLE worth spending, given what the artist leg returned?
+#
+# Two shapes qualify, and only two:
+#   * NOTHING came back — the 0.7.12 recall case, unchanged ("Leo" buries "Cicada Burnt").
+#   * Something came back, at least one candidate STATES a title, and none of them is
+#     folded-exact — the 0.9.27 case (a like-named single standing in for the album).
+#
+# "NO EVIDENCE" IS NOT "NOT EXACT", and collapsing the two is the mistake `_matchExactness`
+# was explicitly written to avoid (it reports `exactness=none` separately from `loose` for
+# this reason). A service that matched but told us no title has not said the match is wrong;
+# retrying on that would spend a full STREAM_SVC_TIMEOUT to learn nothing, on every album,
+# and it is exactly the shape a stubbed or future adapter presents. So the retry needs
+# POSITIVE evidence of looseness, not merely the absence of evidence of exactness.
+sub _wantsTitleRetry {
+    my ($album, $res) = @_;
+    return 0 unless defined $res && ref $res eq 'ARRAY';
+    return 1 unless @$res;                                    # nothing found at all
+    my $stated = 0;
+    for my $it (@$res) {
+        return 0 if _exactFolded($album, $it);                # one exact is enough to settle
+        $stated++ if ref $it eq 'HASH' && defined $it->{_svctitle}
+                  && !ref $it->{_svctitle} && length $it->{_svctitle};
+    }
+    return $stated ? 1 : 0;
+}
+
 # Real service matches out of a _findPlayable answer. _streamResult NEVER returns an
 # empty list — a miss comes back as a one-element "No streaming match found" TEXT row —
 # so emptiness is not the test; `_svc` is (the same distinction reviewDetail draws).
 sub _realMatches {
     my ($res) = @_;
     return grep { ref $_ eq 'HASH' && $_->{_svc} } @{ ($res || {})->{items} || [] };
+}
+
+# How many "other release" rows an ordinary review may offer. Two, not the full
+# STREAM_MAX_RESULTS: these sit above a tracklist, and a page that opens with a stack of
+# near-identical rows is a worse answer than the wrong one it is trying to correct.
+use constant ALT_RELEASE_MAX => 2;
+
+# OFFER THE RIVAL RATHER THAN ADJUDICATE BETWEEN THEM (0.9.27).
+#
+# The ranking above decides what the row plays, and it has to — Play/Add act on the list row
+# without anyone drilling in. But no ranking is right every time, and until now a MATCHED row
+# had no escape at all: it drills into the matched album's tracklist, so `reviewDetail` (with
+# its Refresh row, and the full candidate list) is reachable ONLY from a row that did not
+# match. A wrong match was silent and pinned for STREAM_FOUND_TTL.
+#
+# WHY NOT A RELEASE-TYPE FILTER, which is what the sibling plugin does (LBF 0.9.89 drops
+# single-typed candidates for a non-single release). LBF can, because MusicBrainz states the
+# target's type. PFR HAS NO TYPE FOR THE TARGET AT ALL — `_parseState` extracts artist,
+# album, capsule, link, date, cover, score and genre, and the only hint that ever exists is
+# the literal " EP" in Pitchfork's title, which `_stripFmt` deliberately discards so the
+# match works in the first place. Assuming "the target is an album" is wrong on live data:
+# Pitchfork reviewed *Faith Leazae — Faith EP*, and Deezer types that same record `album`
+# with 8 tracks. A filter built on a type nobody agrees about bins correct EP matches.
+#
+# SO THE DISCRIMINATOR IS THE TITLE, via `_releaseKey` — which is `_norm` with bracketed
+# content judged by what it MEANS rather than deleted wholesale:
+#
+#     Foo               vs  Foo (Deluxe Edition)      -> both "foo"        an EDITION, not offered
+#     This Mirror…      vs  This Mirror…/See Out Loud -> differ            a RELEASE, offered
+#     I Wander          vs  I Wander (III)            -> differ            a RELEASE, offered
+#
+# Plain `_norm` cannot draw that line — it deletes every bracket, so the third row collapses
+# with the first and a 6-track EP becomes indistinguishable from a one-track single. Editions
+# of one record still collapse; releases that merely share a name no longer do. Every
+# candidate here comes from ONE service (the resolver only ever returns `$win`'s matches), so
+# this can never offer "the same album on Tidal" as though it were a different record.
+#
+# The residual gap is an EP and an album titled identically with no bracket to tell them
+# apart, which no title rule can split. That is where a service's own type field would earn
+# its keep — as a reason to OFFER a second row, never as a reason to drop one.
+sub _releaseAlts {
+    my ($primary, $res) = @_;
+
+    # No service title means no evidence, and a guess here would offer the same record twice.
+    my $pn = _releaseKey(($primary || {})->{_svctitle} // '');
+    return () unless length $pn;
+
+    my %seen = ($pn => 1);
+    my @out;
+    for my $node (_realMatches($res)) {
+        last if @out >= ALT_RELEASE_MAX;
+        my $t = $node->{_svctitle};
+        next unless defined $t && !ref $t && length $t;
+        my $n = _releaseKey($t);
+        next unless length $n;
+        next if $seen{$n}++;
+        # A COPY, never the node the resolver cached and handed other callers — the same
+        # rule the combined-review sides follow when they tag `_side`/`_sidetitle`.
+        push @out, { %$node, _altkind => 'release' };
+    }
+    return @out;
 }
 
 # Resolve a REVIEW to playable nodes: `_findPlayable` for an ordinary title, and for
@@ -2859,6 +3047,36 @@ sub _findPlayable {
         # but every one of them was being frozen into the cache as a full album node —
         # paid again in Storable serialisation on every write and every read.
         my $items = defined $win ? _dedupeStreamItems($result[$win]) : [];
+
+        # AN EXACT TITLE WINS THE ROW (0.9.27), which 0.9.21 already does for the sides of a
+        # combined review and this path never did. The row takes `$items->[0]` and the
+        # services return their own relevance order, so a release that merely STARTS WITH
+        # our title can sit in front of the one that IS it.
+        #
+        # THE FIELD CASE. Pitchfork reviewed Interpol's *This Mirror Weighs a Ton* (12
+        # tracks, Qobuz release type Album, released the day of the review). Qobuz also
+        # carries the 2-track single *This Mirror Weighs a Ton/See Out Loud*, which
+        # `_albumMatches` admits through the prefix tier — `index($t, "this mirror weighs a
+        # ton ") == 0` — and which its artist search returns at position 7 against the
+        # album's 68. So the row resolved to the single, cached it for STREAM_FOUND_TTL,
+        # and the drill-in went straight to two tracks.
+        #
+        # PURE REORDERING, and that is what makes it safe in the EP direction as well. It
+        # only does anything when an exact candidate exists behind a loose one; where every
+        # candidate is loose (`I Wander` vs `I Wander (III)` — _norm strips brackets, so
+        # both are admitted and neither equals "i wander ep") nothing moves and the
+        # behaviour is exactly what it was. Measured by 0.9.20's dry run: 165 exact against
+        # 3 loose over 168 matches, and all three loose ones were whole titles with no
+        # exact rival to be promoted over them.
+        #
+        # `grep` returns the matching INDEX because the block is a plain condition; the
+        # `if $ex` skips the no-op when the exact one is already first (and when there is
+        # none, `$ex` is undef). Same idiom as the split path, deliberately.
+        if (@$items > 1) {
+            my ($ex) = grep { _exactFolded($album, $items->[$_]) } 0 .. $#$items;
+            unshift @$items, splice(@$items, $ex, 1) if $ex;
+        }
+
         $items = [ @{$items}[0 .. STREAM_MAX_RESULTS - 1] ] if @$items > STREAM_MAX_RESULTS;
         my $ttl = @$items       ? STREAM_FOUND_TTL
                 : $inconclusive ? STREAM_INCONCLUSIVE_TTL
@@ -2977,14 +3195,47 @@ sub _findPlayable {
         # (LBF 0.9.95). The thin wrapper handed to $runLeg captures $self but is not
         # captured BY it, so nothing points back at itself.
         my $legs = 0;
+        my @leg1;
         my $collect = sub {
             my ($self, $res) = @_;
             return if $settled || $resolved;
-            if ($wantAlbumLeg && !$legs++ && defined $res && ref $res eq 'ARRAY' && !@$res) {
+            # THE RETRY NOW FIRES ON A LOOSE-ONLY RESULT, not only on an empty one (0.9.27).
+            # 0.7.12 added this leg for a RECALL failure — a common-word artist ("Leo")
+            # buries the release past any search cap — and an empty result is only the most
+            # obvious shape of that. The Interpol case is the same failure with a decoy: the
+            # artist search returned a match, so the leg never ran, and the album it should
+            # have found sat at position 68 against QOBUZ_SEARCH_LIMIT of 50. A title search
+            # for "this mirror weighs a ton" returns exactly two rows and both of them are
+            # the right artist, so the release the cap hid is one query away.
+            #
+            # GATED ON THE FOLDED TEST, WHICH IS NOT A DETAIL. On the strict test an EP
+            # review is never exact (see _exactFolded), so every EP-titled review would pay
+            # a second search on every cold resolve for a result it already had. Folded,
+            # `I Wander EP` -> `I Wander` settles on leg 1 and never gets here.
+            #
+            # Raising the cap is the other way to reach the same album and is worse: 68
+            # needs ~100 rows, Qobuz's own `_precacheAlbum` runs synchronously over every
+            # row returned on OUR event loop (the 23.4s article fetch documented above),
+            # and it still leaves the single ahead of the album in raw order.
+            if ($wantAlbumLeg && !$legs++ && _wantsTitleRetry($album, $res)) {
+                @leg1 = @$res;
                 Slim::Utils::Timers::killSpecific($svcTimer) if $svcTimer;
-                _dbgv("resolve $svc: no hit for artist '$artist' — retrying on album '$album'");
+                _dbgv("resolve $svc: " . (@leg1 ? scalar(@leg1) . ' loose match(es)' : 'no hit')
+                    . " for artist '$artist' — retrying on album '$album'");
                 $runLeg->($qaChars, $qaBytes, 'album', sub { $self->($self, @_) });
                 return;
+            }
+            # MERGE, NEVER REPLACE. Leg 1's matches are real — they passed the same
+            # `_albumMatches` gate — and the title query is a different search with its own
+            # recall, so it can legitimately return FEWER rows than the artist query did.
+            # Replacing would turn a loose-but-correct match into a no-match whenever leg 2
+            # missed, which is a regression on every title this leg was not built for.
+            # Leg 2 leads because that is where the exact candidate is expected; the
+            # promotion above then decides, and `_dedupeStreamItems` in $resolve collapses
+            # the rows both legs returned. An undef leg 2 (service unqueryable) falls back
+            # to leg 1 rather than reporting inconclusive — we are holding real matches.
+            if (@leg1) {
+                $res = (defined $res && ref $res eq 'ARRAY') ? [ @$res, @leg1 ] : [ @leg1 ];
             }
             $finish->($res);
         };

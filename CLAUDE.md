@@ -11,6 +11,80 @@ Fresh Releases** plugin. Pure Perl, async, **no extra server software**
 
 Design decisions live in the auto-memory note `album-reviews-plugin-scope`.
 
+## Review Ledger — READ THIS BEFORE REPORTING ANY FINDING
+
+**Why this exists.** Reviews kept re-reporting things that had already been
+decided — deliberate conventions read as defects, and verdicts that lived only in
+a chat transcript. Review and fix happen in separate sessions, so nothing carries
+a decision forward. Everything below has already been settled.
+
+*This repo is the fleet's reference case, and it disproves the obvious
+explanation. The 0.9.22 → 0.9.26 series ran FIVE review rounds against a single
+uncommitted tree of 13,227 insertions, baseline frozen for 13 days, and converged
+4 → 4 → 4 → 2 → 1 → clean — then committed once. So a big uncommitted diff does
+NOT cause findings to repeat. What PFR had was a feature set that stopped moving
+while the rounds ran.*
+
+**If you are reviewing:** read sections A and B first, and report an item from
+them only if you have genuinely NEW information — a case the recorded reasoning
+does not cover. Say which ledger entry you are challenging and what changed.
+
+### A. NOT FINDINGS — deliberate, fleet-wide
+
+- **The zip is not rebuilt and `repo.xml <sha>` is not recomputed in the working
+  tree.** Both happen at build time, together with the version bump. `install.xml`
+  / `repo.xml` / the zip sitting behind the source is the normal mid-work state
+  and was explicitly out of scope for the 0.9.25 and 0.9.26 reviews.
+- **`CHANGELOG.md` and `README` are written at the MERGE TO MAIN, not on dev
+  builds.** A CHANGELOG behind `install.xml` is CORRECT on `dev`. Dev builds
+  update `CLAUDE.md`, `docs/*.md` and the memory notes only.
+- **A large uncommitted working tree, where present, is deliberate** — it is the
+  review diff. Do not prompt to commit as a fix for anything.
+
+### A2. NOT FINDINGS — Pitchfork Reviews specific
+
+- **PFR's matcher copies follow the fleet rule** and are canonical-or-pinned. See
+  `../LMS-ListenBrainz-New-Releases/tools/matcher_sync_check.py`.
+- **Genre/rank grouping is deliberately NOT run through `_groupedRows`** in the
+  contexts noted below — both grouping modes are meaningless there.
+- **Tuning values are not defects.** Where a fix note says a threshold was
+  "deliberately NOT retuned", that is a tuning call and out of scope.
+
+### B. KNOWN-OPEN AND ACCEPTED — do not re-report as new
+
+- **`matcher_sync_check.py` exits 1 fleet-wide.** A known, deliberate hold while
+  DSC's provisional `_albumMatches` alias pass proves in the field. Not a
+  regression in this repo.
+- **PFR will NOT get LBF's `_candReleaseType` single-drop filter (declined 0.9.27).**
+  Proposed while fixing the Interpol wrong-match and rejected on live data. LBF can
+  filter because MusicBrainz states the TARGET's release type; PFR has none —
+  `_parseState` extracts artist, album, capsule, link, date, cover, score and genre,
+  and the only hint that ever exists is the literal " EP" in Pitchfork's title, which
+  `_stripFmt` deliberately discards to make the match work at all. Assuming "the target
+  is an album" is wrong on the current feed: Pitchfork reviewed *Faith Leazae — Faith
+  EP* and Deezer types that same record `album`, 8 tracks. A filter keyed on a type
+  nobody agrees about bins correct EP matches. **Release type may still be used to
+  decide what to OFFER, never what to DROP** — that door is open (it is the residual
+  gap `_releaseAlts` documents), a filter is not.
+- **The Qobuz search payload's `release_type` availability is UNVERIFIED.**
+  `_precacheAlbum` does not delete the field and the plugin reads it elsewhere, but
+  nothing confirms `catalog/search` sends it, and the API needs auth so it cannot be
+  probed from a dev Mac. Deezer (`record_type`, live-verified) and Tidal (`type`, from
+  `API/Async.pm` passing search items through untouched) do carry one. Nothing in the
+  plugin depends on this today; it would need a one-off `_dbgv` key dump first.
+
+### C. CLOSED FINDINGS
+
+Fixed findings are recorded per review in `docs/code-review-<version>.md`
+(0.9.22 → 0.9.26) and in the Status sections below, each with its mechanism and
+its test. The whole 0.9.22–0.9.26 series is closed. Do not re-derive it.
+
+### D. ADDING TO THIS LEDGER
+
+When a finding is declined, or accepted-but-deferred, add it here in the same
+session — one line, with the reason. A decision that lives only in a chat
+transcript will be rediscovered as a finding within days.
+
 ## Feature Summary & Release Posts (social media)
 
 **Maintain this section** (same convention as the sibling ListenBrainz / Listen Later plugins). Two living artefacts for announcing the plugin:
@@ -33,7 +107,8 @@ Design decisions live in the auto-memory note `album-reviews-plugin-scope`.
 - **Choose your services** — set the Qobuz / Tidal / Deezer search order (or turn one off).
 - **Material home shelves** — Best New Music, High Scoring Albums and Latest Reviews as scrollable rows on the Material home page.
 - **Add to Listen Later** — matched albums carry what the companion *Listen Later* plugin needs to save & replay them.
-- **Smart matching** — folds stylised spellings (*WOR$T* = *Worst*, *P!nk* = *Pink*) and a trailing EP/LP so more reviews resolve to a playable album.
+- **Smart matching** — folds stylised spellings (*WOR$T* = *Worst*, *P!nk* = *Pink*) and a trailing EP/LP so more reviews resolve to a playable album; where an artist has an album and a single sharing a name, the reviewed record wins the row.
+- **Not the right album? Change it** — when a service carries another release under the same name, it's offered right there on the album page, alongside a Refresh that re-searches from scratch.
 
 **Requirements:** LMS 9.0.0+ (Material Skin recommended; the classic skin covers browse/play). For playback, at least one of **Qobuz / Tidal / Deezer** installed and signed in. **Pure Perl, cached, no extra server software** — runs the same on a Raspberry Pi or a NAS. Every streaming integration is optional and degrades gracefully.
 
@@ -93,6 +168,126 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 0.9.27
+**A review stopped resolving to a like-named single, and a matched row can be corrected
+by hand for the first time. Found in the field, diagnosed against the live server.**
+
+### The defect
+
+Pitchfork's 28 Aug 2026 review of Interpol's *This Mirror Weighs a Ton* resolved to the
+2-track single of the same name. Verified over jsonrpc, not inferred — the row's favurl
+carried `&al=This Mirror Weighs a Ton/See Out Loud`, and that Qobuz release is
+`Release Type: Single, 2 tracks`. The album is a separate 12-track release, `Album`,
+issued the day of the review.
+
+**TWO INDEPENDENT DEFECTS, and either one alone still gets it wrong.**
+
+1. **The album was never a candidate.** PFR searches the ARTIST and filters locally.
+   Qobuz's artist search puts the single at position **7** and the album at **68**;
+   `QOBUZ_SEARCH_LIMIT` is 50. So `_albumMatches` was never shown the right record.
+2. **Nothing preferred it.** The single passes through the prefix tier
+   (`index("this mirror weighs a ton see out loud", "this mirror weighs a ton ") == 0`)
+   and the row takes `items->[0]` in raw service order. Lift the cap and the single
+   still wins.
+
+Tidal (album at 2, single at 7) and Deezer (0 and 4) would both have been right by
+ordering alone — but `$resolve` takes the highest-priority service that matched
+*anything*, and Qobuz is priority 1.
+
+### THE REVERSE DIRECTION IS WHY THIS IS NOT A TYPE FILTER
+
+The obvious fix — port LBF 0.9.89's `_candReleaseType` single-drop — is wrong here and
+is recorded as declined in the ledger. PFR has no release type for the target and cannot
+get one. Worse, the shape it would damage is live right now: Djrum's *I Wander EP* sits
+on Deezer beside the same-artist singles *I Wander (III)* and *I Wander (IV + V)*, and
+**`_norm` deletes bracketed content**, so all three normalise identically and all three
+are admitted. Only Deezer's ordering was keeping that row correct.
+
+### `_releaseKey` — the one mechanism both halves needed
+
+`_norm` with bracketed content judged by what it MEANS rather than deleted wholesale: an
+EDITION qualifier (a closed list — deluxe/remaster/expanded/…) is dropped, anything else
+is unbracketed and KEPT as part of the title.
+
+| | `_norm` | `_releaseKey` |
+|---|---|---|
+| `Foo` vs `Foo (Deluxe Edition)` | same | same — an edition |
+| `I Wander` vs `I Wander (III)` | **same** | differ — a release |
+| `…a Ton` vs `…a Ton/See Out Loud` | differ | differ |
+
+**The list is closed and fails toward OFFERING:** an unrecognised bracket is treated as
+part of the identity, so it makes two titles distinct. Showing one row too many is
+recoverable; silently hiding the release the reader wanted is not.
+
+### What changed
+
+1. **An exact title takes the row** (`_exactFolded` + a promotion in `$resolve`) — what
+   0.9.21 already does per side of a combined review, applied to the ordinary path.
+   Pure reordering: it does nothing unless an exact candidate sits behind a loose one.
+2. **The album-title retry fires on a LOOSE-ONLY result**, not only an empty one. 0.7.12
+   added that leg for a recall failure ("Leo" burying "Cicada Burnt"); an empty result is
+   just its most obvious shape. A Qobuz title search for `this mirror weighs a ton`
+   returns exactly two rows, so the album the cap hid is one query away. **Merged, never
+   replacing** — leg 2 has its own recall and can legitimately return less.
+3. **`_wantsTitleRetry` demands POSITIVE evidence of looseness.** A candidate stating no
+   title is "no evidence", not "not exact" — the distinction `_matchExactness` was
+   written to keep. Without it every titleless match costs a `STREAM_SVC_TIMEOUT` to
+   learn nothing; the existing suites caught this immediately (26 failures).
+4. **The runner-up is OFFERED** (`_releaseAlts`, cap `ALT_RELEASE_MAX` 2), reusing
+   0.9.17's `_alt` plumbing with its own label — "Another release with this name", never
+   "Also covered by this review", which is a different and false claim. Named from the
+   SERVICE's `_svctitle`, because the service's spelling is what distinguishes the two
+   rows. Ordinary reviews only; a combined review's alts keep their own meaning.
+5. **A matched row can finally reach Refresh.** `reviewDetail` has carried that row since
+   0.8.4 and a matched row could never get to it — the drill-in is the service's
+   tracklist. So the one surface that can correct a bad match was available only to rows
+   with nothing to correct, while `STREAM_FOUND_TTL` pinned the wrong answer for 30 days.
+
+### Scope
+
+**`STREAM_KEY_VERSION` 21 → 22, a CORRECTNESS bump.** Ranking changed, so a stored answer
+under `:21:` can name the wrong release — and the symptom is silent (the row plays, it
+just plays a different record). `PARSE_VERSION` stays at 3; no article parsing changed.
+
+**No matcher change.** `_releaseKey`/`_exactFolded`/`_wantsTitleRetry`/`_releaseAlts` are
+all PFR call-site logic sitting OUTSIDE the shared engine — `_norm`, `%FOLD`,
+`_albumMatches`, `_artistMatch` and the fallback helpers are byte-identical — so
+`matcher_sync_check.py` is unaffected and still reports the same pre-existing DSC drift.
+
+**BUILT AND PACKAGED at 0.9.27** — unlike 0.9.22–0.9.26, which all sat behind the source.
+`install.xml` and `repo.xml` both say 0.9.27, the zip is rebuilt (26 files, 484,833 bytes)
+and `repo.xml <sha>` is recomputed to `61d7082d50c814d021cca923a7de90357060cd72`. Verified
+against the zip on disk rather than assumed, and the zip's own `Browse.pm` checked to carry
+`STREAM_KEY_VERSION => 22`. `README.html`/`index.html` regenerated so the version badge
+(read live from `install.xml`) is not left lying; `README.md` and `CHANGELOG.md` are
+deliberately untouched — those are written at the merge to main.
+
+### Tests
+
+**851 → 924 across TWELVE suites, 0 failures** (was 851/11). New `tools/t_releaserank.pl`
+(50), `t_perf` 398 → 405, `t_reviewintro` 20 → 36.
+
+**Both directions are pinned, because the two properties pull against each other** and a
+future simplification will otherwise pick one: the album must beat the like-named single,
+AND the EP must beat the same-artist bracketed singles.
+
+**THE WIRING IS ASSERTED SEPARATELY FROM THE HELPER, and that gap was found by the
+anti-test rather than by review.** With `_releaseAlts` tested only directly, deleting the
+one line that calls it from `_resolveSection` left the whole suite green — the same shape
+this file has recorded twice before (0.9.17's alt rows, 0.9.10's shelf width). `t_perf`
+section 23 now drives `_resolveSection` and reads `$it->{_alt}`.
+
+**One test premise was deliberately superseded**, not quietly rewritten: `t_reviewintro`'s
+"no capsule and no link -> url NOT wrapped" asserted the early return that the
+unconditional Refresh row replaces. It now asserts the property that still matters — the
+tracklist is untouched and nothing injected is audio.
+
+**Anti-tested TEN ways, every one caught:** the promotion removed fails 6, the retry back
+to empty-only fails 4, leg 2 replacing leg 1 fails 3, the no-evidence rule dropped fails
+24, the alts not wired in fails 2, the Refresh row removed fails 19, `_releaseKey` degraded
+to plain `_norm` fails 6, the edition list emptied fails 8, the two alt labels merged fails
+1, and an alt named from the rendered label fails 2.
 
 ## Status: 0.9.26
 **The two fixes for `docs/code-review-0.9.25.md`, plus the one finding

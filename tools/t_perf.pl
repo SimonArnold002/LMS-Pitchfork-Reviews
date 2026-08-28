@@ -3082,5 +3082,56 @@ $T::Prefs::P{svc_priority_deezer} = 3;
     is('...without fetching', $fetchesOf->($top), 0);
 }
 
+# --- 23. the release alts are actually WIRED IN (0.9.27) --------------------
+# `_releaseAlts` itself is covered in t_releaserank; this asserts the thing a unit test of
+# it CANNOT see — that `_resolveSection`'s resolve callback calls it and hangs the result on
+# `$it->{_alt}`, which is the only reason any of it reaches a row. Reverting the one line
+# that wires it in leaves t_releaserank fully green, which is exactly the gap the repo has
+# been bitten by before (0.9.17's alt rows, 0.9.10's shelf width): a test that assembles the
+# structure by hand passes against the change it is meant to catch.
+{
+    print "\n23. release alts reach the row through _resolveSection\n";
+    my $B = 'Plugins::PitchforkReviews::Browse';
+
+    my $resolveItems = sub {
+        my (%byAlbum) = @_;
+        Slim::Utils::Cache::reset(); Plugins::PitchforkReviews::DB::kvReset();
+        %SCRIPT = (); %BY_ALBUM = (Qobuz => \%byAlbum);
+        my @items = ( { artist => 'Interpol', album => 'This Mirror Weighs a Ton' } );
+        $B->can('_resolveSection')->(undef, \@items, sub {}, $B->VIEW_DEADLINE());
+        return $items[0];
+    };
+    my $c = sub { my ($t, $id) = @_;
+        { name => "Interpol - $t", _svctitle => $t, image => 'c.jpg', _albumid => $id } };
+
+    # THE FIELD CASE, end to end. Qobuz returns the single first (its artist search put the
+    # album at position 68, past QOBUZ_SEARCH_LIMIT); the title leg finds the album; the
+    # album takes the row and the single is offered rather than silently discarded.
+    {
+        my $it = $resolveItems->(
+            'this mirror weighs a ton' => [ $c->('This Mirror Weighs a Ton/See Out Loud', 1),
+                                            $c->('This Mirror Weighs a Ton', 2) ] );
+        is('the ALBUM takes the row',        $it->{_album}{_svctitle}, 'This Mirror Weighs a Ton');
+        is('the single is offered, not lost', $it->{_alt}[0]{_svctitle}, 'This Mirror Weighs a Ton/See Out Loud');
+        is('...tagged as a release alt',      $it->{_alt}[0]{_altkind}, 'release');
+        ok('...and it is a COPY, not the cached node',
+            $it->{_alt}[0] != $it->{_album});
+    }
+    # Editions of one record must NOT become "another release with this name" — that is
+    # noise on every album that has a deluxe, which is most of them.
+    {
+        my $it = $resolveItems->(
+            'this mirror weighs a ton' => [ $c->('This Mirror Weighs a Ton', 2),
+                                            $c->('This Mirror Weighs a Ton (Deluxe Edition)', 3) ] );
+        is('the plain edition takes the row', $it->{_album}{_svctitle}, 'This Mirror Weighs a Ton');
+        ok('no alt row for an edition',       !$it->{_alt});
+    }
+    # One match, nothing to offer.
+    {
+        my $it = $resolveItems->('this mirror weighs a ton' => [ $c->('This Mirror Weighs a Ton', 2) ]);
+        ok('a lone match offers no alternatives', !$it->{_alt});
+    }
+}
+
 printf "\n%d passed, %d failed\n", $p, $f;
 exit($f ? 1 : 0);

@@ -102,14 +102,15 @@ my $LINK = 'https://pitchfork.com/reviews/albums/x/';
     is('capsule row is text',                $out->[0]{type}, 'text');
     is('review link is row 1',               $out->[1]{name}, 'PLUGIN_PITCHFORKREVIEWS_READ_REVIEW');
     is('link keeps its weblink',             $out->[1]{weblink}, $LINK);
-    is('spacer is row 2',                    $out->[2]{name}, "\x{a0}");
-    is('tracks start at row 3',              $out->[3]{name}, 'kiss me');
+    is('refresh row is row 2',               $out->[2]{name}, 'PLUGIN_PITCHFORKREVIEWS_REFRESH_MATCH');
+    is('spacer is row 3',                    $out->[3]{name}, "\x{a0}");
+    is('tracks start at row 4',              $out->[4]{name}, 'kiss me');
     ok('the whole tracklist survives, in order',
-        $out->[3]{name} eq 'kiss me' && $out->[4]{name} eq 'stay' && $out->[5]{name} eq 'Genre: Pop');
-    is('nothing else injected',              scalar @$out, 6);
+        $out->[4]{name} eq 'kiss me' && $out->[5]{name} eq 'stay' && $out->[6]{name} eq 'Genre: Pop');
+    is('nothing else injected',              scalar @$out, 7);
     ok('row stays playable (type playlist)', $row->{type} eq 'playlist');
     ok('no injected row is audio',
-        !grep { ($_->{type} // '') eq 'audio' || $_->{play} } @$out[0..2]);
+        !grep { ($_->{type} // '') eq 'audio' || $_->{play} } @$out[0..3]);
     # The Material duplicate-title trap: non-playable plugin rows key by parent id + TITLE,
     # so our "Genre: Pop" and the service's own would collide and one would vanish.
     ok('no second "Genre:" row injected',
@@ -120,30 +121,80 @@ my $LINK = 'https://pitchfork.com/reviews/albums/x/';
 {
     my (undef, $out) = render({ capsule => $CAP, link => '' });
     is('capsule still shown without a link', $out->[0]{name}, $CAP);
-    is('spacer follows it',                  $out->[1]{name}, "\x{a0}");
-    is('then the tracks',                    $out->[2]{name}, 'kiss me');
+    is('refresh follows it',                 $out->[1]{name}, 'PLUGIN_PITCHFORKREVIEWS_REFRESH_MATCH');
+    is('spacer after that',                  $out->[2]{name}, "\x{a0}");
+    is('then the tracks',                    $out->[3]{name}, 'kiss me');
 }
 
 # --- 3. link but NO capsule: unchanged 0.7.11 behaviour ---------------------
 {
     my (undef, $out) = render({ link => $LINK });
     is('link is row 0 when there is no capsule', $out->[0]{name}, 'PLUGIN_PITCHFORKREVIEWS_READ_REVIEW');
-    is('spacer is row 1',                        $out->[1]{name}, "\x{a0}");
-    is('tracks start at row 2',                  $out->[2]{name}, 'kiss me');
+    is('refresh is row 1',                       $out->[1]{name}, 'PLUGIN_PITCHFORKREVIEWS_REFRESH_MATCH');
+    is('spacer is row 2',                        $out->[2]{name}, "\x{a0}");
+    is('tracks start at row 3',                  $out->[3]{name}, 'kiss me');
 }
 
-# --- 4. neither: the node must be left completely alone ---------------------
+# --- 4. neither: the node IS still wrapped, for the Refresh row -------------
+# THE PREMISE HERE IS DELIBERATELY SUPERSEDED (0.9.27), and it is recorded rather than
+# quietly rewritten. This block used to assert "no capsule and no link -> url NOT wrapped",
+# which was right while the wrapper had nothing to add in that case. It now always adds the
+# Refresh row, and this sub is only ever reached from a MATCHED row — so a row with neither
+# capsule nor link is precisely the one most likely to have matched something odd, and the
+# one that most needs the way out. The property that still matters is asserted instead: the
+# tracklist underneath is untouched, and nothing injected is audio.
 {
     my $row = { name => 'x', type => 'playlist', url => \&inner_hash };
     Plugins::PitchforkReviews::Browse::_attachReviewLink(undef, $row, { capsule => '', link => '' });
-    ok('no capsule and no link -> url NOT wrapped', $row->{url} == \&inner_hash);
+    ok('no capsule and no link -> url IS wrapped, for Refresh', $row->{url} != \&inner_hash);
+    my @out;
+    $row->{url}->(undef, sub { @out = @{ $_[0]{items} } }, {}, {});
+    is('refresh is the only injected row', $out[0]{name}, 'PLUGIN_PITCHFORKREVIEWS_REFRESH_MATCH');
+    is('spacer follows',                   $out[1]{name}, "\x{a0}");
+    is('tracks intact',                    $out[2]{name}, 'kiss me');
+    ok('nothing injected is audio', !grep { ($_->{type} // '') eq 'audio' || $_->{play} } @out[0..1]);
 }
 
 # --- 5. a service that hands back a bare ARRAY ------------------------------
 {
     my (undef, $out) = render({ capsule => $CAP, link => $LINK }, \&inner_array);
     is('ARRAY response: capsule first', $out->[0]{name}, $CAP);
-    is('ARRAY response: tracks kept',   $out->[3]{name}, 'kiss me');
+    is('ARRAY response: tracks kept',   $out->[4]{name}, 'kiss me');
+}
+
+# --- 6. the two kinds of alt row carry DIFFERENT claims (0.9.27) ------------
+# A combined-review side IS covered by the review and is named with PITCHFORK's side title.
+# A `release` alt is the opposite claim — the review is about one record, and this row says
+# the service carries another under a similar name — so it is named with the SERVICE's own
+# title. Sharing one label would make the page unreadable, and naming a release alt from
+# `_sidetitle` (which it does not have) would silently fall back to the service's rendered
+# LABEL, artist baked in — the trap `_svctitle` exists to avoid.
+{
+    my ($row, $out) = render({
+        capsule => $CAP, link => $LINK, artist => 'Interpol',
+        _alt => [
+            { name => 'Interpol - This Mirror Weighs a Ton/See Out Loud',
+              _svctitle => 'This Mirror Weighs a Ton/See Out Loud',
+              _altkind  => 'release', type => 'playlist', url => \&inner_hash,
+              play => 'deezer://album:1' },
+        ],
+    });
+    is('release alt sits above the refresh row', $out->[2]{line2}, 'PLUGIN_PITCHFORKREVIEWS_ALSO_RELEASED');
+    is('named from the SERVICE title, not the rendered label',
+        $out->[2]{name}, 'Interpol - This Mirror Weighs a Ton/See Out Loud');
+    is('line1 matches',                          $out->[2]{line1}, 'Interpol - This Mirror Weighs a Ton/See Out Loud');
+    ok('direct-play affordances stripped (the container stays playable)',
+        !$out->[2]{play} && !$out->[2]{playlist} && !$out->[2]{on_select});
+    ok('it still drills in to its own tracklist', ref $out->[2]{url} eq 'CODE');
+    is('refresh still follows the alts',         $out->[3]{name}, 'PLUGIN_PITCHFORKREVIEWS_REFRESH_MATCH');
+    is('tracks still last',                      $out->[5]{name}, 'kiss me');
+
+    my (undef, $side) = render({
+        capsule => $CAP, link => $LINK, artist => 'Yaeji',
+        _alt => [ { name => 'rendered label', _sidetitle => 'EP2', type => 'playlist', url => \&inner_hash } ],
+    });
+    is('a combined-review side keeps its own claim', $side->[2]{line2}, 'PLUGIN_PITCHFORKREVIEWS_ALSO_REVIEWED');
+    is('and PITCHFORK\'s side title',                $side->[2]{name}, 'Yaeji - EP2');
 }
 
 printf "\n%d passed, %d failed\n", $p, $f;
