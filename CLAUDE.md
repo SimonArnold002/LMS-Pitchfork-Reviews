@@ -77,6 +77,26 @@ does not cover. Say which ledger entry you are challenging and what changed.
   tapping the group toggle (`item_id 2.2`) and re-requesting `2`: both the row label and the
   divider changed. **`forceRefresh` is not needed and is used nowhere in the fleet.** Full
   reasoning in `docs/code-review-0.9.28.md`; memory note `xmlbrowser-no-session-cache`.
+- **`_wantsTitleRetry` will NOT be widened with `_matchExactness` (declined 0.9.29).**
+  Raised as *plausible*: the retry gate gates on `_exactFolded` (via `_releaseKey`, which
+  KEEPS non-edition bracket content), while the 165-exact/3-loose dry run quoted to justify
+  the cost was measured with `_matchExactness` (which deletes every bracket). **The mismatch
+  is real** — `Foo (Live)`, `Foo (feat. X)`, `Sinners (Original Motion Picture Soundtrack)`,
+  `(Extended)`, `(Radio Edit)`, `(Instrumental)`, `(Demo)` are all admitted by
+  `_albumMatches`, all count *exact* under the measurement and *loose* under the shipped
+  gate. **The proposed remedy is not.** Gating on
+  `_exactFolded(...) || _matchExactness(...) eq 'exact'` was built and run: a review of
+  *Foo* whose artist leg returns only *Foo (Live)* stops sending the second query, resolves
+  the row to the live album and pins it for `STREAM_FOUND_TTL` — reinstating the exact
+  defect class 0.9.27 removed, in the shape the retry is most valuable against. The two
+  predicates are deliberately separate (`_matchExactness` is the strict matcher-tier test;
+  `_releaseKey` is the ranking/retry identity), and mixing them inverts the fix.
+  **Residual, accepted:** the *cost figure* is understated, not the gate. Retry frequency
+  under the shipped predicate has never been measured — PFR's debug category is off on the
+  live server, so the field log carries no `retrying on album` lines to count. Measuring it
+  needs `plugin.pitchforkreviews` debug enabled and a cold browse; until then the fan-out
+  cost is the one already documented in `_findPlayable`'s BUILD_DEADLINE note (a
+  four-`STREAM_SVC_TIMEOUT` worst case, accepted since 0.7.12).
 - **The Qobuz search payload's `release_type` availability is UNVERIFIED.**
   `_precacheAlbum` does not delete the field and the plugin reads it elsewhere, but
   nothing confirms `catalog/search` sends it, and the API needs auth so it cannot be
@@ -87,7 +107,7 @@ does not cover. Say which ledger entry you are challenging and what changed.
 ### C. CLOSED FINDINGS
 
 Fixed findings are recorded per review in `docs/code-review-<version>.md`
-(0.9.22 → 0.9.26, 0.9.28) and in the Status sections below, each with its mechanism and
+(0.9.22 → 0.9.26, 0.9.28, 0.9.29) and in the Status sections below, each with its mechanism and
 its test. The whole 0.9.22–0.9.26 series is closed. Do not re-derive it.
 
 ### D. ADDING TO THIS LEDGER
@@ -179,6 +199,86 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 0.9.29
+**A code-review fix on top of 0.9.28's: the match a slow service left unchecked is still
+served, but it is no longer kept for a month. Plus one finding declined after its proposed
+remedy was built and shown to regress.**
+
+### The defect (review finding 1)
+
+0.9.28 stopped a slow leg 2 from discarding matches leg 1 was holding, by moving the
+`@leg1` merge into `$finish`. Correct — and it made `$res` **always defined** once leg 1
+held anything, so the `!defined $res` inconclusive branch became unreachable on that path.
+A leg-2 **timeout** therefore came out of the *found* side of `$resolve`, where the TTL is
+`STREAM_FOUND_TTL`: thirty days.
+
+The release's own field case, one step further. Qobuz's artist leg returns only the 2-track
+*This Mirror Weighs a Ton/See Out Loud*; the album-title leg that exists to find the
+12-track album times out; the single is pinned for a month on the strength of a query that
+never answered. That is the same wrong-match-for-a-month shape 0.9.27 removed, reached by a
+new route. 0.9.28's TTL note only covered the `@leg1`-*empty* case.
+
+### The fix
+
+Serving the leg-1 match stays — withholding it is exactly the 0.9.28 bug. What changes is
+how long it is kept. A fourth TTL category, `STREAM_UNVALIDATED_TTL` (1 day), because the
+existing three cannot express "a real answer nobody checked"; a per-adapter `@unvalidated`
+set at the merge site; and `$resolve` reading the **winner's** flag.
+
+**The discriminator is whether leg 2 ANSWERED, not whether it found anything.** An empty
+array is a verdict — it looked and had nothing to add — so leg 1's match stands validated
+and keeps the long TTL. A watchdog, a throw, or an `undef` callback is not a verdict. Hence
+the test is on `$finish`'s argument, not on `@leg1`.
+
+A day rather than the inconclusive hour: the shape that lands here is a service that *hung*,
+so an hourly retry spends a fresh `STREAM_SVC_TIMEOUT` against `BUILD_DEADLINE` on every
+open for as long as that service stays slow. A day bounds the exposure to the daily warm,
+which re-resolves the expired entry and validates it properly.
+
+Five lines of code. **939 assertions across twelve suites, 0 failures** (931 before;
+`t_releaserank` 57 → 65). The new assertions were run against the pre-fix behaviour and
+four of them fail there, so they discriminate; the four guard assertions — a service that
+hung while *losing* the row must not shorten the winner's answer — stay green in both.
+
+### Declined (review finding 2)
+
+`_wantsTitleRetry` stays on the folded test. The mismatch the finding identified is real
+(the 165/3 dry run was measured with `_matchExactness`, the gate uses `_exactFolded`), but
+the proposed remedy was built and run, and it re-resolves a review of *Foo* to *Foo (Live)*
+and pins it for thirty days. Full reasoning in ledger entry B and
+`docs/code-review-0.9.29.md`.
+
+### Wider check — what the change reaches
+
+Each consumer of the resolve outcome was checked rather than assumed, because the risk in a
+TTL fix is pushing the problem one layer down. `_cacheStream`'s payload and the ListenLater
+handshake are untouched (the flag is a lexical array, never a key on an item);
+`_matchProgress` reads `_album` first, so a matched row is never counted *pending*
+regardless of TTL; and **`_findPlayableReview` has no outer cache layer** — verified over
+its whole range, it contains no `kvSet`/`_cacheStream` and composes per-side `_findPlayable`
+results, each under its own key, so the short TTL cannot be defeated by an outer hit. That
+is the layered-cache trap that bit LBF; it does not apply here. Full table in
+`docs/code-review-0.9.29.md`.
+
+Also swept: a called-vs-defined sub pass (`perl -c` cannot see this) whose unresolved-name
+set is byte-identical to the previous commit's, and `matcher_sync_check.py`, which reports
+the same three pre-existing DRIFT entries — the diff touches no matcher sub.
+
+**`STREAM_KEY_VERSION` 22 → 23, a CORRECTNESS bump**, and the entries it retires are the
+ones `:22:` itself wrote. 0.9.27/0.9.28 stored answers whose checking leg never answered
+under `STREAM_FOUND_TTL`; 0.9.29 gives that shape the short TTL, but only for answers
+written from here on — an entry already in the store keeps its 30-day slot and nothing
+re-examines it. Same silent symptom as `:22:` (the row plays, it just plays a different
+record). `PARSE_VERSION` stays at **3**; no article parsing or fetch behaviour changed.
+
+**BUILT AND PACKAGED at 0.9.29.** `install.xml` and `repo.xml` both say 0.9.29, the zip is
+rebuilt (26 files, 490,060 bytes) and `repo.xml <sha>` recomputed to
+`d6b49c467b1f37b5a16aeb7cde441fe4c3cb24b4`. Verified against the zip on disk rather than
+assumed: the zip's `Browse.pm` is byte-identical to the tree, carries the fix, and reads
+`STREAM_KEY_VERSION => 23`. `README.html`/`index.html` regenerated so the version badge is
+not left lying; `README.md` and `CHANGELOG.md` deliberately untouched — those are written at
+the merge to main.
 
 ## Status: 0.9.28
 **A code-review fix: a slow streaming service could throw away a match the plugin had

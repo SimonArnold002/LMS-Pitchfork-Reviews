@@ -63,7 +63,12 @@ BEGIN {
     package Plugins::PitchforkReviews::DB;
     sub getList { undef } sub putList { 1 } sub listAge { undef }
     sub forget { 1 } sub forgetAll { 1 } sub storedKeys { () }
-    sub kvGet { undef } sub kvSet { 1 } sub kvDel { 1 }
+    # kvSet RECORDS rather than discarding (0.9.29), because the TTL a resolve chooses is
+    # itself an assertion now — see section 3b. kvGet still returns undef, so nothing is
+    # ever SERVED from here and the assertions above stay non-vacuous.
+    sub kvGet { undef }
+    sub kvSet { push @main::WROTE, { key => $_[0], ttl => $_[2] }; 1 }
+    sub kvDel { 1 }
     sub kvForgetPrefix { 0 } sub kvCount { 0 } sub kvReset { }
 }
 
@@ -79,6 +84,9 @@ sub is { my ($d, $g, $w) = @_; ok("$d  ->  '" . ($g // '') . "'", (($g // '') eq
 # A matched candidate as an adapter builds one: the SERVICE's own title in `_svctitle`
 # (artist affix already stripped), which is the only field the ranking reads.
 sub cand { my ($t) = @_; return { name => "Interpol - $t", _svctitle => $t, image => 'c.jpg' } }
+
+our @WROTE;                       # every kvSet a resolve made: { key, ttl }
+sub ttl_written { return @WROTE ? $WROTE[-1]{ttl} : undef }
 
 my @QUERIES;
 sub adapters_returning {
@@ -114,6 +122,7 @@ my $GOT;
 sub resolve {
     my ($artist, $album, %svc) = @_;
     @QUERIES  = ();
+    @WROTE    = ();
     @ADAPTERS = adapters_returning(%svc);
     @Slim::Utils::Timers::armed = ();
     $GOT = undef;
@@ -301,6 +310,55 @@ print "\n3. the album-title retry — positive evidence only\n";
     my @t = titles($r);
     is('both legs merge into one set', scalar(@t), 2);
     ok('deduped — the single is not listed twice', 1 == grep { $_ eq $SINGLE } @t);
+}
+
+# --- 3b. HOW LONG AN UNCHECKED ANSWER IS KEPT (0.9.29) ----------------------
+# 0.9.28 fixed the merge and, in doing so, made `$res` always defined once leg 1 held
+# anything — so a leg-2 timeout stopped reaching the `!defined $res` inconclusive branch and
+# came out the FOUND side, where the TTL is thirty days. The result is correct to SERVE
+# (that is 0.9.28's whole point) and wrong to PIN: the loose candidate the second query
+# existed to rule out got a month on the strength of a query that never answered, which is
+# the same wrong-match-for-a-month shape 0.9.27 set out to remove.
+#
+# The discriminator is whether leg 2 ANSWERED, not whether it found anything. An empty
+# array is a verdict — it looked and had nothing to add — so leg 1's match stands validated
+# and keeps STREAM_FOUND_TTL. A watchdog, a throw, or an undef callback is not a verdict.
+#
+# Guard direction included deliberately: the flag is PER-ADAPTER, so a service that hung
+# while LOSING the row must not shorten the winner's fully-checked answer.
+print "\n3b. an answer leg 2 never checked is not pinned for a month\n";
+{
+    my $FOUND = $B->can('STREAM_FOUND_TTL')->();
+    my $UNVAL = $B->can('STREAM_UNVALIDATED_TTL')->();
+    ok('an unvalidated answer is kept for less time than a checked one', $UNVAL < $FOUND);
+
+    resolve('Interpol', $ALBUM, Qobuz => { script => [ [ cand($SINGLE) ], [ cand($ALBUM) ] ] });
+    is('leg 2 answered -> long TTL', ttl_written(), $FOUND);
+
+    resolve('Interpol', $ALBUM, Qobuz => { script => [ [ cand($SINGLE) ], [] ] });
+    is('an EMPTY leg 2 is still a verdict -> long TTL', ttl_written(), $FOUND);
+
+    resolve('Interpol', $ALBUM, Qobuz => { script => [ [ cand($SINGLE) ], 'HANG' ] });
+    fire_watchdog();
+    is('a leg-2 TIMEOUT -> short TTL', ttl_written(), $UNVAL);
+
+    resolve('Interpol', $ALBUM, Qobuz => { script => [ [ cand($SINGLE) ], 'DIE' ] });
+    is('a leg-2 THROW -> short TTL', ttl_written(), $UNVAL);
+
+    resolve('Interpol', $ALBUM, Qobuz => { script => [ [ cand($SINGLE) ], undef ] });
+    is('a leg-2 undef callback -> short TTL', ttl_written(), $UNVAL);
+
+    # Aqobuz/Btidal sort by priority; the names only fix the order.
+    resolve('Interpol', $ALBUM,
+        Aqobuz => { priority => 1, script => [ [ cand($ALBUM) ] ] },
+        Btidal => { priority => 2, script => [ [ cand($SINGLE) ], 'HANG' ] });
+    is('GUARD: a hung LOSING service does not shorten the winner', ttl_written(), $FOUND);
+
+    resolve('Interpol', $ALBUM,
+        Aqobuz => { priority => 1, script => [ [], [] ] },
+        Btidal => { priority => 2, script => [ [ cand($SINGLE) ], 'HANG' ] });
+    fire_watchdog();
+    is('an unvalidated service that DOES win takes the short TTL', ttl_written(), $UNVAL);
 }
 
 # --- 4. _releaseAlts: offer the rival, never adjudicate ---------------------

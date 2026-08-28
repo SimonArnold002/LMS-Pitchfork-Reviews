@@ -163,7 +163,7 @@ use constant STREAM_KEY_PREFIX       => 'pfr:stream:';
 # asked for, and would read as "the limit did nothing". Compare against the 0.9.15
 # baseline — median 2513ms, raw median 83 — using searches at least five minutes apart,
 # and that also means no cache clearing is needed to get a cold run: just wait.
-use constant STREAM_KEY_VERSION      => 22;
+use constant STREAM_KEY_VERSION      => 23;
 
 # How long a coalescing slot may be joined before it is assumed wedged (see
 # _findPlayable). Comfortably past the worst honest resolve — four serial
@@ -196,6 +196,22 @@ sub _ageResolvingSlot {
 use constant STREAM_FOUND_TTL        => 30 * 86400;  # 2_592_000 is the ceiling — do not raise
 use constant STREAM_NOMATCH_TTL      => 1 * 86400;   # confirmed "not on any service"
 use constant STREAM_INCONCLUSIVE_TTL => 3600;        # couldn't query a service -> retry soon
+# A REAL ANSWER THAT WAS NEVER VALIDATED (0.9.29) — its own category, deliberately, because
+# the three above cannot express it. 0.9.27 fires an album-title leg when the artist leg came
+# back LOOSE-ONLY, and 0.9.28 makes $finish merge those leg-1 matches back in so a slow leg 2
+# can no longer discard them. Correct — but it also means a leg-2 TIMEOUT now yields a
+# non-empty result, which took STREAM_FOUND_TTL: the loose candidate the second search existed
+# to check got pinned for THIRTY DAYS on the strength of a query that never answered. That is
+# the wrong-match-pinned-for-a-month defect this series exists to remove, reached by a new
+# route. So: serve the match (it passed `_albumMatches`; withholding it is the 0.9.28
+# regression), but store it for ONE DAY, not thirty.
+# Why a day and not STREAM_INCONCLUSIVE_TTL's hour: an hour makes every list open after the
+# first re-resolve the album, and the shape that lands here is a service that HUNG — so each
+# retry costs a fresh STREAM_SVC_TIMEOUT against BUILD_DEADLINE, on every open, for as long as
+# that service stays slow. A day bounds the exposure to the daily warm, which re-resolves any
+# expired entry (see the pump in _resolveSection) and validates it properly the moment the
+# service answers.
+use constant STREAM_UNVALIDATED_TTL  => 1 * 86400;   # matched, but the checking leg never answered
 use constant STREAM_SVC_TIMEOUT      => 8;           # per-service search watchdog (s)
 use constant STREAM_MAX_RESULTS      => 12;
 
@@ -2397,6 +2413,16 @@ sub _streamKey {
     # yield is ever exercised and the fix cannot be confirmed. The listing/bnm/hsa and
     # year keys are bumped alongside this one; a partial bump would leave the articles
     # cached and only half-reproduce first boot.
+    # :23: (0.9.29) — a CORRECTNESS bump, and the entries it retires are the ones :22:
+    # itself wrote. 0.9.27/0.9.28 stored an answer whose CHECKING LEG NEVER ANSWERED under
+    # STREAM_FOUND_TTL, so a leg-2 timeout pinned a loose candidate — the Interpol single
+    # again — for thirty days. 0.9.29 gives that shape STREAM_UNVALIDATED_TTL, but only for
+    # answers written from here on: an entry already stored under :22: carries the long TTL
+    # in the store and nothing re-examines it. Same silent symptom as :22: (the row plays,
+    # it just plays a different record) and the same reasoning — the fix is unobservable
+    # against exactly the entries it exists to correct. `PARSE_VERSION` stays at 3: no
+    # article parsing or fetch behaviour changed.
+    #
     # :22: (0.9.27) — a CORRECTNESS bump, and one that must not be skipped. Candidate
     # RANKING changed (an exact title now takes the row) and the retry leg now fires on a
     # loose-only result, so a stored answer under :21: can name the wrong release —
@@ -3006,6 +3032,12 @@ sub _findPlayable {
     my @result       = map { undef } @adapters;   # undef=pending, []=miss, [..]=match
     my $resolved     = 0;
     my $inconclusive = 0;
+    # Per-adapter: this service's answer is leg 1's, kept because leg 2 never answered
+    # (see STREAM_UNVALIDATED_TTL). Held in its own array rather than as a flag on the
+    # items or as another $inconclusive: the items are what `_cacheStream` freezes and
+    # what the ListenLater handshake reads, and `$inconclusive` decides the EMPTY-result
+    # TTL and the "no match" log line — neither of which this is.
+    my @unvalidated;
 
     my $resolve = sub {
         return if $resolved;
@@ -3078,7 +3110,12 @@ sub _findPlayable {
         }
 
         $items = [ @{$items}[0 .. STREAM_MAX_RESULTS - 1] ] if @$items > STREAM_MAX_RESULTS;
-        my $ttl = @$items       ? STREAM_FOUND_TTL
+        # THE WINNER'S OWN PROVENANCE DECIDES, not the run's. `@unvalidated` is per-adapter
+        # and only the service that actually won the row is being stored, so a hung leg 2 on
+        # a service that lost (or was never consulted) must not shorten a fully validated
+        # answer. `$win` is defined whenever `@$items` is non-empty — `$items` is `[]` unless
+        # it is — so the lookup is safe inside this branch.
+        my $ttl = @$items       ? ($unvalidated[$win] ? STREAM_UNVALIDATED_TTL : STREAM_FOUND_TTL)
                 : $inconclusive ? STREAM_INCONCLUSIVE_TTL
                 :                 STREAM_NOMATCH_TTL;
         # A failed cache write must not take the ANSWER with it. The callers below are
@@ -3093,6 +3130,8 @@ sub _findPlayable {
         _dbgv("resolve '$artistNorm / $albumNorm': "
             . (defined $win ? "matched on $adapters[$win]{name} (" . scalar(@$items) . ') '
                               . _matchExactness($album, $items->[0])
+                              . ($unvalidated[$win] ? ' UNVALIDATED (leg 2 never answered, '
+                                                      . STREAM_UNVALIDATED_TTL . 's)' : '')
                             : "no match" . ($inconclusive ? " ($inconclusive inconclusive)" : "")));
 
         # THE WAITERS ARE SERVED BEFORE $callback, AND EACH ONE IS GUARDED. $callback
@@ -3153,6 +3192,18 @@ sub _findPlayable {
             # inconclusive; and 0.9.27 fires leg 2 on a LOOSE-ONLY leg 1, so those held
             # matches are the common case, not an edge one.
             if (@leg1) {
+                # AND RECORD THAT NOBODY CHECKED IT (0.9.29). Leg 2 not coming back as an
+                # ARRAY means it never answered — its watchdog fired, `$runLeg`'s eval caught
+                # a throw, or the adapter called back undef. The merge below is still right
+                # (leg 1's matches passed `_albumMatches`; dropping them is 0.9.28's bug), but
+                # what comes out is an UNCHECKED answer wearing a checked one's clothes, and
+                # `$resolve` would otherwise pin it for STREAM_FOUND_TTL — thirty days for the
+                # like-named single the second query existed to rule out.
+                # A leg 2 that DID answer, even with `[]`, is a real verdict: it looked and had
+                # nothing to add, so leg 1's match stands fully validated and keeps the long
+                # TTL. That is the discriminator, and it is why this is tested on the ARGUMENT
+                # and not on `@leg1`.
+                $unvalidated[$i] = 1 unless defined $res && ref $res eq 'ARRAY';
                 $res = (defined $res && ref $res eq 'ARRAY') ? [ @$res, @leg1 ] : [ @leg1 ];
             }
             # undef = couldn't query the service (no handler / timeout / error /
