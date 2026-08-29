@@ -102,7 +102,13 @@ BEGIN {
 
     package Slim::Utils::Log;     use Exporter 'import'; our @EXPORT = qw(logger);
                                   sub addLogCategory {} sub logger { bless {}, 'T::Log' }
-    package T::Log;               our $AUTOLOAD; sub AUTOLOAD {} sub is_debug {0} sub is_info {0}
+    # `warn` is RECORDED rather than swallowed (0.9.30), because a warn line is now an
+    # assertable behaviour and not just noise: a service that cannot answer has to SAY so,
+    # and the defect being guarded against is silence. Everything else still falls through
+    # AUTOLOAD, so no other suite or assertion changes.
+    package T::Log;               our $AUTOLOAD; our @WARNED;
+                                  sub warn { push @WARNED, $_[1]; 1 }
+                                  sub AUTOLOAD {} sub is_debug {0} sub is_info {0}
     package Slim::Utils::Prefs;   use Exporter 'import'; our @EXPORT = qw(preferences);
                                   sub preferences { bless {}, 'T::Prefs' }
     package T::Prefs;             our $AUTOLOAD; our %P;
@@ -2036,6 +2042,69 @@ $T::Prefs::P{svc_priority_deezer} = 3;
        ref $sent[0]{args} eq 'HASH');
     is('...carrying the cap, so Qobuz stops defaulting to 200 rows',
         $sent[0]{args}{limit}, $B->QOBUZ_SEARCH_LIMIT());
+}
+
+# --- A SERVICE THAT CANNOT ANSWER HAS TO SAY SO (0.9.30) --------------------
+#
+# Field case, and it is why this is a test rather than a tidy-up. Four Tet's review title
+# makes TIDAL's search return 500 every time. `_searchTidal` answers `undef` — correctly,
+# because "couldn't query" is not "not there" — so the resolve counts one service
+# inconclusive and takes STREAM_INCONCLUSIVE_TTL instead of STREAM_NOMATCH_TTL, and that row
+# re-resolves hourly rather than daily, indefinitely.
+#
+# None of that was visible. `_dbgSearch` runs AFTER the undef returns, so a service that
+# FAILED left the same trace as one never asked: nothing. Diagnosing it needed a per-service
+# count of `search <Svc>/albums` lines to notice Tidal logged one where the others logged
+# two. The point of the fix is that the log now says it.
+#
+# WARN, not `_dbgv`: a diagnostic behind the debug switch cannot catch a defect whose whole
+# symptom is that there is nothing to notice.
+{
+    my $B = 'Plugins::PitchforkReviews::Browse';
+    my $api_erroring = sub {
+        no warnings 'redefine', 'once';
+        local *Plugins::Qobuz::Plugin::getAPIHandler = sub { bless {}, 'T::QobuzAPI' };
+        local *T::QobuzAPI::search = sub { $_[1]->(undef) };   # the 500 shape
+        my $got = 'unset';
+        $B->can('_searchQobuz')->(undef, 'Four Tet', 'four tet', 'some album',
+                                  'Qobuz', sub { $got = $_[0] }, 'Some Album');
+        return $got;
+    };
+
+    @T::Log::WARNED = ();
+    my $got = $api_erroring->();
+    ok('an errored search still answers undef (inconclusive, not a false miss)', !defined $got);
+    my @w = grep { /Qobuz/ && /errored/ } @T::Log::WARNED;
+    is('...and it now WARNS, so the silence is over', scalar(@w), 1);
+    ok('...naming the service and the query, which is what identifies the leg',
+       ($w[0] // '') =~ /Qobuz/ && ($w[0] // '') =~ /Four Tet/);
+    ok('...and says what it cost — the inconclusive count is the reason the TTL drops',
+       ($w[0] // '') =~ /inconclusive/);
+
+    # THE GUARD DIRECTION: a healthy empty result is NOT an error and must stay quiet.
+    # Collapsing the two would put a warn on every album a service simply doesn't carry.
+    @T::Log::WARNED = ();
+    {
+        no warnings 'redefine', 'once';
+        local *Plugins::Qobuz::Plugin::getAPIHandler = sub { bless {}, 'T::QobuzAPI' };
+        local *T::QobuzAPI::search = sub { $_[1]->({ albums => { items => [] } }) };
+        $B->can('_searchQobuz')->(undef, 'Four Tet', 'four tet', 'some album',
+                                  'Qobuz', sub {}, 'Some Album');
+    }
+    is('a DEFINED but empty result warns nothing', scalar(@T::Log::WARNED), 0);
+
+    # A MISSING HANDLER IS A STANDING STATE, NOT AN EVENT — usually "signed out", true for
+    # every album in the run. Warning per resolve would put ~150 identical lines in one warm
+    # and bury whatever you opened the log to read.
+    @T::Log::WARNED = ();
+    for (1 .. 5) {
+        no warnings 'redefine', 'once';
+        local *Plugins::Qobuz::Plugin::getAPIHandler = sub { undef };
+        $B->can('_searchQobuz')->(undef, 'Four Tet', 'four tet', 'some album',
+                                  'Qobuz', sub {}, 'Some Album');
+    }
+    is('five resolves with no API handler warn ONCE, not five times',
+       scalar(grep { /no API handler/ } @T::Log::WARNED), 1);
 }
 
 # ===========================================================================

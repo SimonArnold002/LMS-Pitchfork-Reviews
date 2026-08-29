@@ -3541,6 +3541,40 @@ sub _rebuildStreamItems {
 # cap, because "we pulled 200 rows" says nothing about whether the match was at row 3 or
 # row 180. Capping below the observed maximum silently loses those matches, which is the
 # 'Leo / Cicada Burnt' failure that the second search leg exists to work around.
+# WHY A SERVICE WENT QUIET, SAID OUT LOUD (0.9.30).
+#
+# Every adapter has three ways to answer `undef` — no API handler, the API erroring, and
+# the foreign renderer throwing on every candidate — and the first two produced NO log line
+# at all. `_dbgSearch` is called AFTER both, so a service that FAILED left exactly the same
+# trace as one that was never asked: nothing.
+#
+# That is how a live Tidal fault stayed invisible. Four Tet's review title makes TIDAL's
+# search return 500 on every attempt; PFR correctly counts the service inconclusive, and
+# `$inconclusive` takes STREAM_INCONCLUSIVE_TTL instead of STREAM_NOMATCH_TTL — so that row
+# re-resolves hourly instead of daily, at 5 searches a cycle, indefinitely. Nothing in PFR's
+# own log said why. The only evidence was a MISSING `search Tidal/albums` line beside the
+# other two services' present ones, and a `Plugins::TIDAL::API::Async … Error: 500` that
+# nobody would think to correlate. Reconstructing that took a per-service line count.
+#
+# WARN, NOT `_dbgv`, AND THAT IS THE WHOLE POINT. A diagnostic gated behind the debug switch
+# is no use for the case it exists to catch: you turn the switch on after NOTICING, and the
+# defect here is that there is nothing to notice. One sick album costs a line an hour; a
+# service-wide outage — the case actually worth seeing — announces itself instead of showing
+# up as quietly fewer matches and a 24x rise in resolve traffic.
+#
+# `$once` is for the standing-state case rather than the event case. A missing API handler
+# usually means the user is signed OUT of that service, which is true for every album in the
+# run — warning per resolve would put ~150 identical lines in a single warm and bury the
+# thing you wanted to read. Once per service per process says it exactly as often as it is
+# worth saying. (Same shape as the signed-out Spotty note in the ListenBrainz sibling.)
+my %CANT_ANSWER_WARNED;
+sub _svcCantAnswer {
+    my ($svc, $why, $query, $collect, $once) = @_;
+    $log->warn("resolve $svc: $why — counted inconclusive (q='" . ($query // '') . "')")
+        unless $once && $CANT_ANSWER_WARNED{$svc}++;
+    return $collect->(undef);
+}
+
 sub _dbgSearch {
     my ($svc, $leg, $query, $t0, $raw, $kept, $firstAt) = @_;
     # Return before the sprintf, not after: this is the one site called often enough
@@ -3584,11 +3618,12 @@ sub _searchQobuz {
     my $t0 = Time::HiRes::time();
 
     my $api = Plugins::Qobuz::Plugin::getAPIHandler($client);
-    unless ($api) { $collect->(undef); return; }   # undef -> inconclusive
+    unless ($api) { return _svcCantAnswer($svc, 'no API handler (signed out?)', $query, $collect, 1) }
 
     $api->search(sub {
         my $res = shift;
-        return $collect->(undef) unless defined $res;   # errored, not "no results"
+        # errored, not "no results" — the distinction the whole inconclusive path rests on
+        return _svcCantAnswer($svc, 'search errored', $query, $collect) unless defined $res;
         my $rows = ($res && $res->{albums} && $res->{albums}{items}) || [];
         my @out;
         my $rendererFailed = 0;
@@ -3620,7 +3655,8 @@ sub _searchQobuz {
             push @out, $item;
         }
         _dbgSearch('Qobuz', 'albums', $query, $t0, scalar(@$rows), scalar(@out), $firstAt);
-        return $collect->(undef) if !@out && $rendererFailed;
+        return _svcCantAnswer($svc, 'every candidate failed to render', $query, $collect)
+            if !@out && $rendererFailed;
         $collect->(\@out);
     }, lc($query), 'albums', { limit => QOBUZ_SEARCH_LIMIT });
 }
@@ -3631,11 +3667,11 @@ sub _searchTidal {
     my $t0 = Time::HiRes::time();
 
     my $api = Plugins::TIDAL::Plugin::getAPIHandler($client);
-    unless ($api) { $collect->(undef); return; }
+    unless ($api) { return _svcCantAnswer($svc, 'no API handler (signed out?)', $query, $collect, 1) }
 
     $api->search(sub {
         my $albums = shift;   # raw album hashes (type => albums)
-        return $collect->(undef) unless defined $albums;
+        return _svcCantAnswer($svc, 'search errored', $query, $collect) unless defined $albums;
         my @out;
         my $rendererFailed = 0;
         my ($idx, $firstAt) = (0, undef);
@@ -3665,7 +3701,8 @@ sub _searchTidal {
             push @out, $item;
         }
         _dbgSearch('Tidal', 'albums', $query, $t0, (ref $albums eq 'ARRAY' ? scalar(@{$albums}) : undef), scalar(@out), $firstAt);
-        return $collect->(undef) if !@out && $rendererFailed;
+        return _svcCantAnswer($svc, 'every candidate failed to render', $query, $collect)
+            if !@out && $rendererFailed;
         $collect->(\@out);
     }, { type => 'albums', search => $query, limit => 50 });
 }
@@ -3679,11 +3716,11 @@ sub _searchDeezer {
     my $t0 = Time::HiRes::time();
 
     my $api = Plugins::Deezer::Plugin::getAPIHandler($client);
-    unless ($api) { $collect->(undef); return; }
+    unless ($api) { return _svcCantAnswer($svc, 'no API handler (signed out?)', $query, $collect, 1) }
 
     $api->search(sub {
         my $albums = shift;
-        return $collect->(undef) unless defined $albums;
+        return _svcCantAnswer($svc, 'search errored', $query, $collect) unless defined $albums;
         # Tolerate a hash-wrapped list so a shape mismatch degrades to a clean miss
         # rather than dying in this async callback (outside _findPlayable's eval).
         $albums = $albums->{data} || $albums->{albums} || [] if ref $albums eq 'HASH';
@@ -3717,7 +3754,8 @@ sub _searchDeezer {
             push @out, $item;
         }
         _dbgSearch('Deezer', 'albums', $query, $t0, (ref $albums eq 'ARRAY' ? scalar(@{$albums}) : undef), scalar(@out), $firstAt);
-        return $collect->(undef) if !@out && $rendererFailed;
+        return _svcCantAnswer($svc, 'every candidate failed to render', $query, $collect)
+            if !@out && $rendererFailed;
         $collect->(\@out);
     }, { search => $query, type => 'album', strict => 'off', limit => 50 });
 }

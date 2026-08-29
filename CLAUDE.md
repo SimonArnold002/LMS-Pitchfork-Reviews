@@ -200,6 +200,63 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
+## Status: 0.9.30
+**A service that cannot answer now says so. Found by diagnosing a live Tidal fault that
+PFR's own log had no way to show.**
+
+### The field case
+
+Pitchfork reviewed a Four Tet record whose title is built from combining characters (a
+"zalgo" string). TIDAL's search returns **HTTP 500** on it, every time. `_searchTidal`
+answers `undef` — which is correct, because *couldn't query* is not *not there* — so the
+resolve counts one service inconclusive and takes `STREAM_INCONCLUSIVE_TTL` instead of
+`STREAM_NOMATCH_TTL`. That row therefore re-resolves **hourly rather than daily**, at 5
+searches a cycle, for as long as the review is in the feed.
+
+**The re-checking itself is not the defect** — services add albums all the time, and a
+no-match is deliberately re-probed on a timer so a late arrival is picked up. `NOMATCH_TTL`
+is one day for exactly that reason. The defect is that a *service fault* silently changed
+the cadence by 24x with nothing anywhere saying why.
+
+### Why it was invisible
+
+Every adapter has three ways to answer `undef` — no API handler, the API erroring, the
+foreign renderer throwing on every candidate — and the first two returned **above**
+`_dbgSearch`. So a service that FAILED left exactly the same trace as one that was never
+asked: nothing at all. Diagnosing it took a per-service count of `search <Svc>/albums`
+lines to spot that Tidal logged one leg where Qobuz and Deezer each logged two, then
+correlating that absence with a `Plugins::TIDAL::API::Async … Error: 500` line.
+
+Not Tidal-specific: all three adapters have the same shape.
+
+### The fix
+
+One shared `_svcCantAnswer($svc, $why, $query, $collect, $once)`, wired into all nine undef
+sites. It states the service, the reason, the query (which identifies the leg) and the cost.
+
+**At WARN, not `_dbgv`, and that is the point** — a diagnostic gated behind the debug switch
+cannot catch a defect whose entire symptom is that there is nothing to notice. You turn the
+switch on *after* spotting something.
+
+**`$once` for the standing-state case.** A missing API handler usually means signed out,
+which is true for every album in the run; warning per resolve would put ~150 identical lines
+in one warm and bury whatever you opened the log for. Once per service per process instead.
+
+**A defined-but-empty result stays silent** — that is a healthy answer, and collapsing it
+with an error would warn on every album a service simply doesn't carry. Pinned by a test.
+
+**No behaviour change.** Same `undef`, same inconclusive count, same TTLs; only the log
+moves. `Plugins::TIDAL` is untouched — the 500 is Tidal's, and Qobuz answered the same
+character-encoded query fine (`raw=1`), so this is not a PFR encoding bug.
+
+**NO CACHE BUMP, checked rather than assumed.** Nothing stored changes, and the row this
+exists to diagnose is on a 1-hour inconclusive TTL — it re-resolves and prints the new line
+within the hour on its own. `STREAM_KEY_VERSION` stays at **23**, `PARSE_VERSION` at **3**.
+
+**945 assertions across twelve suites, 0 failures** (939 before; `t_perf` 405 → 411). Run
+against the pre-fix `Browse.pm`, 4 of the 6 new assertions fail and the 2 guard directions
+stay green, so they discriminate rather than mirror the change.
+
 ## Status: 0.9.29
 **A code-review fix on top of 0.9.28's: the match a slow service left unchecked is still
 served, but it is no longer kept for a month. Plus one finding declined after its proposed
