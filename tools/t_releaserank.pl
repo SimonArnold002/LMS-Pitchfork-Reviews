@@ -67,7 +67,13 @@ BEGIN {
     # itself an assertion now — see section 3b. kvGet still returns undef, so nothing is
     # ever SERVED from here and the assertions above stay non-vacuous.
     sub kvGet { undef }
-    sub kvSet { push @main::WROTE, { key => $_[0], ttl => $_[2] }; 1 }
+    # THE ITEMS ARE RECORDED TOO (0.9.31), not just the TTL. `_streamResult` runs its OWN
+    # dedupe and STREAM_MAX_RESULTS cap on the way to the caller, so an assertion made
+    # against the RENDERED list cannot tell what $resolve did from what the renderer did —
+    # a dedupe deleted from $resolve still passes such a test. What is cached is $resolve's
+    # own output, and it is also what a later open replays, so that is what gets pinned.
+    sub kvSet { push @main::WROTE, { key => $_[0], ttl => $_[2],
+                                     items => ($_[1] && $_[1]{items}) || [] }; 1 }
     sub kvDel { 1 }
     sub kvForgetPrefix { 0 } sub kvCount { 0 } sub kvReset { }
 }
@@ -87,6 +93,8 @@ sub cand { my ($t) = @_; return { name => "Interpol - $t", _svctitle => $t, imag
 
 our @WROTE;                       # every kvSet a resolve made: { key, ttl }
 sub ttl_written { return @WROTE ? $WROTE[-1]{ttl} : undef }
+# What $resolve actually CACHED, before _streamResult re-dedupes and re-caps it.
+sub cached_titles { return map { $_->{_svctitle} // '' } @{ (@WROTE ? $WROTE[-1]{items} : []) } }
 
 my @QUERIES;
 sub adapters_returning {
@@ -109,6 +117,20 @@ sub adapters_returning {
                 # undef and is a different path (the service answered "couldn't query").
                 return              if defined $next && !ref $next && $next eq 'HANG';
                 die "adapter blew up\n" if defined $next && !ref $next && $next eq 'DIE';
+                # The two ways a real adapter reports "I could not search", both routed
+                # through the PLUGIN'S OWN `_svcCantAnswer` rather than faked as a bare
+                # undef — the standing/transient split (0.9.31) lives in that sub, so a
+                # test that hand-rolled the undef would pass whatever the sub did.
+                # 'SIGNEDOUT' = the `no API handler` sites (the $standing flag, set at
+                # exactly three call sites); 'ERRORED' = the search came back undef.
+                if (defined $next && !ref $next && $next eq 'SIGNEDOUT') {
+                    return $B->can('_svcCantAnswer')
+                             ->($svc, 'no API handler (signed out?)', $query, $collect, 1);
+                }
+                if (defined $next && !ref $next && $next eq 'ERRORED') {
+                    return $B->can('_svcCantAnswer')
+                             ->($svc, 'search errored', $query, $collect);
+                }
                 $collect->($next);
             },
         };
@@ -359,6 +381,179 @@ print "\n3b. an answer leg 2 never checked is not pinned for a month\n";
         Btidal => { priority => 2, script => [ [ cand($SINGLE) ], 'HANG' ] });
     fire_watchdog();
     is('an unvalidated service that DOES win takes the short TTL', ttl_written(), $UNVAL);
+}
+
+# --- 3c. WHICH LEG LEADS THE MERGE (0.9.31) --------------------------------
+# 0.9.27 merged the two legs as `[ @leg2, @leg1 ]` and justified leading with leg 2 on the
+# grounds that "the promotion in $resolve then decides". It decides only when there is
+# something to decide BETWEEN: the promotion greps for `_exactFolded` and does nothing at
+# all when no candidate matches it. So with both legs loose, the merge ORDER silently
+# became the adjudicator, and leg 2's first row — a title search, ordered by title
+# relevance, which is precisely how a like-named rival gets to the front — took the row
+# and was pinned for STREAM_FOUND_TTL, because leg 2 having answered is what marks a row
+# validated.
+#
+# THIS IS THE REGRESSION 0.9.27 INTRODUCED WHILE FIXING THE INTERPOL CASE. The old retry
+# gate was `!@$res`: a loose-only leg 1 never ran leg 2, so leg 1's match stood. Widening
+# the gate is right and stays; leading with leg 2 unconditionally does not.
+#
+# THE SHIPPED RULE IS `[ @leg1, @$res ]` UNCONDITIONALLY — leg 2 never leads. It does not
+# need to: reaching this merge proves `@leg1` is exact-free (`_wantsTitleRetry` returns 0
+# on a folded-exact leg 1), so the only exact that can exist is leg 2's, and the promotion
+# lifts it from wherever it sits. A conditional "lead with leg 2 when it brought the exact"
+# was built and discarded as a provable no-op. Read the assertions accordingly: when leg 2
+# wins below it wins by PROMOTION, never by position.
+#
+# Both directions are pinned. The Interpol fix (leg 2 brings the exact) must still work,
+# and the EP direction — where NOTHING is exact and the leg-1 answer is the conservative
+# one — must not be decided by whichever leg happened to be concatenated first.
+print "\n3c. leg 1 leads the merge; an exact wins by PROMOTION, not by position\n";
+{
+    my $FOUND = $B->can('STREAM_FOUND_TTL')->();
+    my $L1 = 'Foo (feat. Guest)';       # leg 1 (artist query) — right artist, loose title
+    my $L2 = 'Foo (Remix)';             # leg 2 (title query)  — equally loose, not the record
+    my $c  = sub { { name => "Interpol - $_[0]", _svctitle => $_[0], image => 'c.jpg' } };
+
+    ok('neither rival is folded-exact, so the promotion cannot arbitrate',
+        !$B->can('_exactFolded')->('Foo', $c->($L1))
+     && !$B->can('_exactFolded')->('Foo', $c->($L2)));
+
+    my $r = resolve('Interpol', 'Foo', Qobuz => { script => [ [ $c->($L1) ], [ $c->($L2) ] ] });
+    is('two legs ran (the 0.9.27 loose-only gate still fires)', scalar(queries()), 2);
+    is('LEG 1 takes the row when nothing is exact', (titles($r))[0], $L1);
+    ok('...and leg 2 is still merged in, not discarded', 2 == scalar(titles($r)));
+    is('...at the long TTL, because leg 2 did answer', ttl_written(), $FOUND);
+
+    # THE INTERPOL DIRECTION, unchanged: leg 2 exists to reach the release the artist
+    # search buried, and when it brings it back that release takes the row.
+    $r = resolve('Interpol', $ALBUM,
+        Qobuz => { script => [ [ cand($SINGLE) ], [ cand($ALBUM) ] ] });
+    is('leg 2\'s exact still takes the row, promoted past leg 1', (titles($r))[0], $ALBUM);
+
+    # An exact anywhere in leg 2 counts, not just at its front — the grep tests the whole
+    # leg, and the promotion in $resolve then lifts it.
+    $r = resolve('Interpol', $ALBUM,
+        Qobuz => { script => [ [ cand($SINGLE) ], [ cand('Foo (Remix)'), cand($ALBUM) ] ] });
+    is('an exact BEHIND a loose row in leg 2 still wins', (titles($r))[0], $ALBUM);
+
+    # Leg 1 holding the exact never gets here (the retry does not fire at all), but the
+    # merge must not disturb it if some future gate change lets it through.
+    $r = resolve('Interpol', $ALBUM, Qobuz => { script => [ [ cand($ALBUM) ], [ cand($SINGLE) ] ] });
+    is('an exact leg 1 settles without a second leg', scalar(queries()), 1);
+    is('...and keeps the row',                        (titles($r))[0], $ALBUM);
+
+    # Leg 2 never answering is the 0.9.29 path and must still fall back to leg 1 whole.
+    $r = resolve('Interpol', 'Foo', Qobuz => { script => [ [ $c->($L1) ], 'DIE' ] });
+    is('a leg-2 throw still leaves leg 1 holding the row', (titles($r))[0], $L1);
+
+    # THE MERGE MEETS THE DEDUPE AND THE CAP, which sit either side of the promotion
+    # (`_dedupeStreamItems` -> promotion -> STREAM_MAX_RESULTS). Reordering the merge
+    # changes which copy of a duplicate survives and which rows the cap deletes, so both
+    # boundaries are pinned rather than reasoned about.
+    #
+    # Overlapping legs: both searches legitimately return the same release, and after
+    # 0.9.31 leg 1's copy is the one that survives. The exact must still reach the front.
+    # Asserted against the CACHE, not the rendered list: _streamResult dedupes again, so a
+    # dedupe deleted from $resolve would still render two rows and pass.
+    resolve('Interpol', $ALBUM,
+        Qobuz => { script => [ [ cand($SINGLE) ], [ cand($SINGLE), cand($ALBUM) ] ] });
+    my @ov = cached_titles();
+    is('an overlapping row is CACHED once, not twice', scalar(@ov), 2);
+    is('...and the exact is still promoted to the row', $ov[0], $ALBUM);
+
+    # THE CAP CANNOT EAT THE EXACT. Leg 1 returns more loose rows than STREAM_MAX_RESULTS
+    # and leg 2 brings the exact LAST — so in merged order the exact sits past the cap.
+    # The promotion runs BEFORE the truncation, which is what saves it; swap those two and
+    # this is the assertion that fails.
+    my $MAX = $B->can('STREAM_MAX_RESULTS')->();
+    resolve('Interpol', $ALBUM, Qobuz => {
+        script => [ [ map { cand("Filler $_") } 1 .. $MAX + 3 ], [ cand($ALBUM) ] ] });
+    my @cap = cached_titles();
+    is('the CACHED list is capped at STREAM_MAX_RESULTS', scalar(@cap), $MAX);
+    is('...and the exact survives the cap, at the front', $cap[0], $ALBUM);
+}
+
+# --- 3d. SIGNED OUT IS NOT INCONCLUSIVE (0.9.31) ---------------------------
+# `_svcCantAnswer`'s `$once` flag marks a STANDING inability — the plugin is installed but
+# nobody is signed in, so `_detectAdapters` (which gates on `->can()` and nothing else)
+# keeps the adapter in `@adapters` on every resolve for ever. 0.9.30 used that flag to warn
+# once instead of per album and left the TTL side alone, so every genuinely unmatched album
+# took STREAM_INCONCLUSIVE_TTL — an hour where a real miss earns a day, 24x the resolve
+# traffic, for as long as the service stays signed out, with nothing that could ever clear
+# it.
+#
+# The split is not "ignore it": a service that could not search has not voted. It shortens
+# the TTL only when NO adapter managed to search at all.
+print "\n3d. a signed-out service is out of the run, not an inconclusive answer\n";
+{
+    my $NOMATCH = $B->can('STREAM_NOMATCH_TTL')->();
+    my $INCONC  = $B->can('STREAM_INCONCLUSIVE_TTL')->();
+    my $FOUND   = $B->can('STREAM_FOUND_TTL')->();
+    ok('an inconclusive answer is retried sooner than a confirmed miss', $INCONC < $NOMATCH);
+
+    resolve('Interpol', $ALBUM,
+        Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
+        Btidal => { priority => 2, script => [ [], [] ] });
+    is('one signed out, one really searched and missed -> a real no-match',
+        ttl_written(), $NOMATCH);
+
+    resolve('Interpol', $ALBUM,
+        Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
+        Btidal => { priority => 2, script => ['SIGNEDOUT'] });
+    is('EVERY service signed out -> nobody searched, so still no verdict',
+        ttl_written(), $INCONC);
+
+    # THE TRANSIENT SIDE IS UNTOUCHED. A search that errored, a watchdog, a throw: all of
+    # these can succeed on the next open, and all still earn the short retry.
+    resolve('Interpol', $ALBUM,
+        Aqobuz => { priority => 1, script => ['ERRORED'] },
+        Btidal => { priority => 2, script => [ [], [] ] });
+    is('a TRANSIENT error still forces the short TTL', ttl_written(), $INCONC);
+
+    resolve('Interpol', $ALBUM,
+        Aqobuz => { priority => 1, script => [ [], 'HANG' ] },
+        Btidal => { priority => 2, script => [ [], [] ] });
+    fire_watchdog();
+    is('a TIMEOUT still forces the short TTL', ttl_written(), $INCONC);
+
+    # A signed-out service must not shorten an answer another service actually found,
+    # and must not stop the fan-out reaching it.
+    resolve('Interpol', $ALBUM,
+        Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
+        Btidal => { priority => 2, script => [ [ cand($ALBUM) ] ] });
+    is('a signed-out service does not shorten a real match', ttl_written(), $FOUND);
+
+    # And it does not consume the retry: the signed-out leg sends undef, which
+    # `_wantsTitleRetry` refuses, so no second query is spent on a service that cannot
+    # answer either of them.
+    resolve('Interpol', $ALBUM, Qobuz => { script => ['SIGNEDOUT', [ cand($ALBUM) ] ] });
+    is('a signed-out service is asked exactly once', scalar(queries()), 1);
+
+    # THREE ADAPTERS, THE UNAVAILABLE ONE IN THE MIDDLE. `$unavailable == @adapters` is an
+    # equality against the adapter COUNT, so a partial tally must not accidentally satisfy
+    # it, and the fan-out (which only adapter 0 performs) still has to reach adapter 2.
+    resolve('Interpol', $ALBUM,
+        Aqobuz => { priority => 1, script => [ [], [] ] },
+        Btidal => { priority => 2, script => ['SIGNEDOUT'] },
+        Cdeezr => { priority => 3, script => [ [], [] ] });
+    is('one of three unavailable, the others really missed -> a real no-match',
+        ttl_written(), $NOMATCH);
+
+    resolve('Interpol', $ALBUM,
+        Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
+        Btidal => { priority => 2, script => ['SIGNEDOUT'] },
+        Cdeezr => { priority => 3, script => ['SIGNEDOUT'] });
+    is('all three unavailable -> no verdict', ttl_written(), $INCONC);
+
+    # A SERVICE THAT SIGNED OUT BETWEEN ITS OWN TWO LEGS. Barely reachable in the field
+    # (leg 1 succeeding means the handler existed), but it is the one shape where the
+    # standing flag arrives while leg 1 is holding matches. The merge makes $res defined,
+    # so the flag is correctly IGNORED — there is a match to serve — and the row takes the
+    # unvalidated TTL, because leg 2 still never checked it.
+    my $mid = resolve('Interpol', $ALBUM, Qobuz => { script => [ [ cand($SINGLE) ], 'SIGNEDOUT' ] });
+    is('signed out between legs still serves leg 1', (titles($mid))[0], $SINGLE);
+    is('...at the unvalidated TTL, not counted unavailable',
+        ttl_written(), $B->can('STREAM_UNVALIDATED_TTL')->());
 }
 
 # --- 4. _releaseAlts: offer the rival, never adjudicate ---------------------

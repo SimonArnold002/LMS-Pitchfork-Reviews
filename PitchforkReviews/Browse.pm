@@ -163,7 +163,16 @@ use constant STREAM_KEY_PREFIX       => 'pfr:stream:';
 # asked for, and would read as "the limit did nothing". Compare against the 0.9.15
 # baseline — median 2513ms, raw median 83 — using searches at least five minutes apart,
 # and that also means no cache clearing is needed to get a cold run: just wait.
-use constant STREAM_KEY_VERSION      => 23;
+#
+# :23: -> :24: (0.9.31). A CORRECTNESS BUMP, the same class as 0.9.27's 21 -> 22 and for
+# the same reason: which release takes the row changed. Where neither leg had a folded-exact
+# candidate, the merge order handed the row to the album-title leg's first loose hit and
+# STREAM_FOUND_TTL pinned it for thirty days — so a stored answer under :23: can name the
+# wrong release, with a valid-looking entry and no symptom to notice. The second fix makes
+# it worse to leave: those wrong answers sit next to no-match entries written at the
+# one-hour TTL that should have been a day, so a warm store is a mix of two defects.
+# PARSE_VERSION stays at 3 — no article parsing or fetching changed.
+use constant STREAM_KEY_VERSION      => 24;
 
 # How long a coalescing slot may be joined before it is assumed wedged (see
 # _findPlayable). Comfortably past the worst honest resolve — four serial
@@ -3032,6 +3041,22 @@ sub _findPlayable {
     my @result       = map { undef } @adapters;   # undef=pending, []=miss, [..]=match
     my $resolved     = 0;
     my $inconclusive = 0;
+    # A SERVICE THAT IS SIGNED OUT IS OUT OF THE RUN, NOT AN INCONCLUSIVE ANSWER (0.9.31).
+    # `_svcCantAnswer`'s `$once` flag already distinguishes a STANDING state (no API handler
+    # — the plugin is installed but nobody is signed in) from a transient one (the search
+    # errored, the watchdog fired). 0.9.30 gave that distinction to the LOG and stopped
+    # there; the TTL side kept treating both as `$inconclusive`, so one signed-out service
+    # forced STREAM_INCONCLUSIVE_TTL on EVERY genuinely unmatched album — an hour instead of
+    # a day, 24x the resolve traffic, for as long as the user leaves it signed out. It never
+    # self-heals: `_detectAdapters` gates on `->can()` and knows nothing about sign-in, so
+    # the adapter is in `@adapters` on every resolve for ever.
+    #
+    # Counted SEPARATELY rather than simply not counted, because "nobody could search" is
+    # still not a verdict. A standing-unavailable service shortens the TTL only when EVERY
+    # adapter was unavailable — then no search happened at all and there is nothing to pin.
+    # If even one service really looked and missed, that is a real no-match and earns
+    # STREAM_NOMATCH_TTL.
+    my $unavailable  = 0;
     # Per-adapter: this service's answer is leg 1's, kept because leg 2 never answered
     # (see STREAM_UNVALIDATED_TTL). Held in its own array rather than as a flag on the
     # items or as another $inconclusive: the items are what `_cacheStream` freezes and
@@ -3115,8 +3140,14 @@ sub _findPlayable {
         # a service that lost (or was never consulted) must not shorten a fully validated
         # answer. `$win` is defined whenever `@$items` is non-empty — `$items` is `[]` unless
         # it is — so the lookup is safe inside this branch.
+        # `$unavailable == @adapters` is only ever evaluated on the no-match path, and
+        # $resolve does not reach here until every adapter has reported (the loop above
+        # returns on the first undef `$result[$i]`), so it really does mean "not one
+        # service was able to search". With no adapters at all it is 0 == 0 — also true,
+        # also the right answer, though _findPlayable returns before this on that path.
         my $ttl = @$items       ? ($unvalidated[$win] ? STREAM_UNVALIDATED_TTL : STREAM_FOUND_TTL)
                 : $inconclusive ? STREAM_INCONCLUSIVE_TTL
+                : $unavailable == @adapters ? STREAM_INCONCLUSIVE_TTL
                 :                 STREAM_NOMATCH_TTL;
         # A failed cache write must not take the ANSWER with it. The callers below are
         # waiting on a result we already hold; the worst case of not storing it is that the
@@ -3132,7 +3163,9 @@ sub _findPlayable {
                               . _matchExactness($album, $items->[0])
                               . ($unvalidated[$win] ? ' UNVALIDATED (leg 2 never answered, '
                                                       . STREAM_UNVALIDATED_TTL . 's)' : '')
-                            : "no match" . ($inconclusive ? " ($inconclusive inconclusive)" : "")));
+                            : "no match" . ($inconclusive ? " ($inconclusive inconclusive)" : "")
+                                         . ($unavailable  ? " ($unavailable unavailable)"   : "")
+                                         . ($ttl == STREAM_NOMATCH_TTL ? '' : " ttl=$ttl")));
 
         # THE WAITERS ARE SERVED BEFORE $callback, AND EACH ONE IS GUARDED. $callback
         # chains into the full feed render — a lot of code, any of which can die — and the
@@ -3175,16 +3208,57 @@ sub _findPlayable {
             return if $settled || $resolved;
             $settled = 1;
             Slim::Utils::Timers::killSpecific($svcTimer) if $svcTimer;
-            my $res = $_[0];
+            # $standing: this service cannot answer and will not be able to next time either
+            # (signed out). Only ever set by `_svcCantAnswer`'s `$once` sites — $runLeg's
+            # watchdog and its eval-failure branch call $finish with one argument, so a
+            # timeout or a throw stays transient, which is what they are.
+            my ($res, $standing) = @_;
             # MERGE, NEVER REPLACE. Leg 1's matches are real — they passed the same
             # `_albumMatches` gate — and the title query is a different search with its own
             # recall, so it can legitimately return FEWER rows than the artist query did,
             # or none, or nothing at all. Replacing would turn a loose-but-correct match
             # into a no-match whenever leg 2 missed, which is a regression on every title
             # this leg was not built for.
-            # Leg 2 leads because that is where the exact candidate is expected; the
-            # promotion in $resolve then decides, and `_dedupeStreamItems` collapses the
-            # rows both legs returned.
+            # LEG 2 LEADS ONLY WHEN IT ACTUALLY BROUGHT THE EXACT (0.9.31). It used to lead
+            # unconditionally, on the reasoning that "the promotion in $resolve then decides".
+            # That reasoning holds only while an exact candidate EXISTS: the promotion greps
+            # for `_exactFolded` and is a no-op when nothing matches it, so with both legs
+            # loose the merge ORDER became the decider by accident, and leg 2's arbitrary
+            # first loose hit took the row — pinned for STREAM_FOUND_TTL, because leg 2
+            # answering is exactly what marks the row validated.
+            #
+            # THAT IS A 0.9.27 REGRESSION, not a pre-existing wart. Before 0.9.27 the retry
+            # gate was `!@$res`, so a loose-only leg 1 never fired leg 2 at all and leg 1's
+            # match took the row unopposed. Widening the gate to loose-only is right — it is
+            # the Interpol fix — but it routed a whole new class of resolve through a merge
+            # order that was only ever justified for the exact case.
+            #
+            # WHY LEG 1 IS THE BETTER DEFAULT WHEN NEITHER IS EXACT. Leg 1 is the ARTIST
+            # query, so every row it returns is already the right artist and the title is
+            # what `_albumMatches` judged. Leg 2 is the TITLE query: it exists for recall,
+            # reaching releases the artist search buried, and its relevance order is
+            # title-first — which is why it is the leg that surfaces a like-named rival in
+            # the first place. With no exact to arbitrate, the artist-scoped answer is the
+            # conservative one and it is also the one the plugin shipped for four versions.
+            #
+            # AND LEG 1 CAN LEAD UNCONDITIONALLY, which is why there is no test on leg 2
+            # here. `_wantsTitleRetry` returns 0 the moment leg 1 holds a folded-exact, so
+            # reaching this merge at all PROVES `@leg1` is exact-free. The only exact that
+            # can exist is leg 2's, and the promotion in $resolve lifts it from wherever it
+            # sits in the merged list — the order never decided that case, only the case
+            # where nothing is exact. A conditional "lead with leg 2 when it brought the
+            # exact" was built first and is provably a no-op: it was anti-tested by
+            # replacing it with this line, and every assertion still held.
+            #
+            # It also sidesteps a real edge in that promotion, which is `if $ex` and not
+            # `if defined $ex`. Leading with leg 2 puts its exact at index 0, where `$ex`
+            # is 0 and the unshift is skipped — harmless only because the row is already
+            # first. Leading with leg 1 (non-empty by the guard above) means an exact is
+            # always at index >= 1, so the promotion genuinely runs.
+            #
+            # `_dedupeStreamItems` still collapses the rows both legs returned, and
+            # `_releaseAlts` still offers the runner-up, so nothing is LOST by ordering —
+            # only which release the row itself opens.
             # THIS MUST LIVE IN $finish, NOT IN $collect. $runLeg's watchdog and its eval
             # failure branch call $finish DIRECTLY — $collect is the adapter's callback and
             # is never reached when leg 2 times out or throws. With the merge in $collect,
@@ -3204,12 +3278,14 @@ sub _findPlayable {
                 # TTL. That is the discriminator, and it is why this is tested on the ARGUMENT
                 # and not on `@leg1`.
                 $unvalidated[$i] = 1 unless defined $res && ref $res eq 'ARRAY';
-                $res = (defined $res && ref $res eq 'ARRAY') ? [ @$res, @leg1 ] : [ @leg1 ];
+                $res = (defined $res && ref $res eq 'ARRAY') ? [ @leg1, @$res ] : [ @leg1 ];
             }
             # undef = couldn't query the service (no handler / timeout / error /
             # broken renderer) -> inconclusive (short-TTL retry), not a real miss.
+            # A STANDING inability (signed out) is a different thing and counts elsewhere —
+            # see the $unavailable note where it is declared.
             if (!defined $res) {
-                $inconclusive++;
+                $standing ? $unavailable++ : $inconclusive++;
                 $result[$i] = [];
                 $resolve->();
                 $fanOut->();
@@ -3271,7 +3347,10 @@ sub _findPlayable {
         # captured BY it, so nothing points back at itself.
         my $legs = 0;
         my $collect = sub {
-            my ($self, $res) = @_;
+            # $standing rides through to $finish untouched (0.9.31) — see its note there.
+            # The retry gate below cannot fire on it: `_wantsTitleRetry` returns 0 for
+            # anything that is not an ARRAY ref, and a standing failure always sends undef.
+            my ($self, $res, $standing) = @_;
             return if $settled || $resolved;
             # THE RETRY NOW FIRES ON A LOOSE-ONLY RESULT, not only on an empty one (0.9.27).
             # 0.7.12 added this leg for a RECALL failure — a common-word artist ("Leo")
@@ -3301,7 +3380,7 @@ sub _findPlayable {
             }
             # $finish merges @leg1 back in — every outcome, including a leg-2 watchdog or
             # throw, has to get that fallback and only $finish sees them all.
-            $finish->($res);
+            $finish->($res, $standing);
         };
 
         $runLeg->($qChars, $qBytes, 'artist', sub { $collect->($collect, @_) });
@@ -3569,10 +3648,16 @@ sub _rebuildStreamItems {
 # worth saying. (Same shape as the signed-out Spotty note in the ListenBrainz sibling.)
 my %CANT_ANSWER_WARNED;
 sub _svcCantAnswer {
-    my ($svc, $why, $query, $collect, $once) = @_;
-    $log->warn("resolve $svc: $why — counted inconclusive (q='" . ($query // '') . "')")
-        unless $once && $CANT_ANSWER_WARNED{$svc}++;
-    return $collect->(undef);
+    my ($svc, $why, $query, $collect, $standing) = @_;
+    $log->warn("resolve $svc: $why — counted " . ($standing ? 'unavailable' : 'inconclusive')
+             . " (q='" . ($query // '') . "')")
+        unless $standing && $CANT_ANSWER_WARNED{$svc}++;
+    # THE FLAG IS THE STANDING/TRANSIENT SPLIT, NOT JUST A LOG SWITCH (0.9.31). It was
+    # added in 0.9.30 to warn once about a state that repeats for ever instead of on every
+    # album; that "for ever" is precisely what makes it wrong to count as inconclusive, so
+    # the same flag now rides through $collect to $finish and decides the no-match TTL.
+    # Set at the three `no API handler (signed out?)` sites and nowhere else.
+    return $collect->(undef, $standing ? 1 : 0);
 }
 
 sub _dbgSearch {

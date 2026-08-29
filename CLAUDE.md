@@ -107,8 +107,19 @@ does not cover. Say which ledger entry you are challenging and what changed.
 ### C. CLOSED FINDINGS
 
 Fixed findings are recorded per review in `docs/code-review-<version>.md`
-(0.9.22 → 0.9.26, 0.9.28, 0.9.29) and in the Status sections below, each with its mechanism and
+(0.9.22 → 0.9.26, 0.9.28, 0.9.29, 0.9.31) and in the Status sections below, each with its mechanism and
 its test. The whole 0.9.22–0.9.26 series is closed. Do not re-derive it.
+
+- **The two-leg merge leads with LEG 1, unconditionally (0.9.31).** Do not propose
+  restoring `[ @leg2, @leg1 ]`, and do not propose the middle position either — a
+  conditional "lead with leg 2 when leg 2 brought the folded-exact" was built, tested and
+  discarded as a **provable no-op**. `_wantsTitleRetry` returns 0 the moment leg 1 holds a
+  folded-exact, so reaching the merge proves `@leg1` is exact-free; the only exact that can
+  exist is leg 2's, and the promotion in `$resolve` lifts it from wherever it sits. Replacing
+  the conditional with the plain line left all 82 assertions in `t_releaserank.pl` green.
+  Leading with leg 2 is what pinned a wrong release for thirty days whenever NEITHER leg was
+  exact (the promotion is a no-op there, so order became the adjudicator). Both directions
+  are pinned by sections 3c and 3d.
 
 ### D. ADDING TO THIS LEDGER
 
@@ -199,6 +210,111 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 0.9.31
+**Two defects the 0.9.27–0.9.30 series left behind, both found by reviewing that series
+rather than in the field: a wrong release pinned for a month, and a signed-out service
+holding every no-match at the one-hour retry for ever.**
+
+### 1. The merge order was deciding the row whenever nothing was exact
+
+0.9.27 merged the two search legs as `[ @leg2, @leg1 ]` and justified leading with leg 2
+on the grounds that *"the promotion in `$resolve` then decides"*. It decides only when
+there is something to decide between. The promotion greps for `_exactFolded` and is a
+**no-op when no candidate matches it**, so with both legs loose the merge **order** became
+the adjudicator by accident — and leg 2 is the *title* query, ordered by title relevance,
+which is exactly how a like-named rival reaches the front. Its first loose hit took the
+row and `STREAM_FOUND_TTL` pinned it for **thirty days**, because leg 2 having answered is
+precisely what marks a row validated (0.9.29).
+
+**This was a 0.9.27 regression, not an old wart.** The pre-0.9.27 retry gate was `!@$res`,
+so a loose-only leg 1 never fired leg 2 and its match stood unopposed. Widening the gate to
+loose-only is right and stays — it is the Interpol fix — but it routed a whole new class of
+resolve through a merge order only ever justified for the exact case. Verified against the
+repo's harness: review *A – Foo*, artist leg returns `Foo (feat. X)`, retry leg returns
+`Foo (Remix)` → row `Foo (Remix)`, ttl 2592000.
+
+**The fix is one line, and the interesting part is what it is NOT.** A conditional
+"lead with leg 2 when leg 2 actually brought the exact" was built first, and it is provably
+a no-op: `_wantsTitleRetry` returns 0 the moment leg 1 holds a folded-exact, so reaching
+the merge at all proves `@leg1` is exact-free, the only possible exact is leg 2's, and the
+promotion lifts it from wherever it sits. Anti-testing caught this — replacing the
+conditional with plain `[ @leg1, @$res ]` left every assertion green — so the shipped fix
+is the plain line. It also sidesteps a real edge in that promotion, which is `if $ex` and
+not `if defined $ex`: leading with leg 2 put its exact at index 0, where `$ex` is 0 and the
+unshift is silently skipped.
+
+### 2. A signed-out service is out of the run, not an inconclusive answer
+
+`_svcCantAnswer`'s `$once` flag marks a **standing** inability — the plugin is installed
+but nobody is signed in. 0.9.30 added that flag to warn once per process instead of ~150
+times per warm, and stopped there. The TTL side kept counting it as `$inconclusive`, so one
+signed-out service forced `STREAM_INCONCLUSIVE_TTL` on **every genuinely unmatched album** —
+an hour where a real miss earns a day. That is the same 24x cadence defect 0.9.30 was cut to
+diagnose, arriving by a different door, and it **never self-heals**: `_detectAdapters` gates
+on `->can()` and knows nothing about sign-in, so the adapter is in `@adapters` on every
+resolve for as long as the user leaves it signed out.
+
+The split is not "ignore it" — a service that could not search has not voted. `$unavailable`
+is counted separately from `$inconclusive` and shortens the TTL only when **every** adapter
+was unavailable, because then no search happened at all and there is nothing to pin. If even
+one service really looked and missed, that is a real no-match at `STREAM_NOMATCH_TTL`. The
+transient side is untouched: a search that errored, a watchdog, a throw can all succeed on
+the next open and all still earn the short retry.
+
+The flag rides `_svcCantAnswer` → `$collect` → `$finish` as a second argument. `$runLeg`'s
+watchdog and its eval-failure branch call `$finish` with one argument, so a timeout or a
+throw stays transient — which is what they are.
+
+### Cache + tests
+
+`STREAM_KEY_VERSION` 23 → 24, a correctness bump of the same class as 0.9.27's 21 → 22:
+which release takes the row changed, so a stored answer under `:23:` can name the wrong
+release with a valid-looking entry and no symptom. `PARSE_VERSION` stays at 3 — no article
+parsing or fetching changed.
+
+Tests 945 → 970 across the same twelve suites, 0 failures. New `t_releaserank.pl` sections
+3c (merge order, both directions) and 3d (standing vs transient, with the all-signed-out,
+transient-error, timeout, three-adapter and winner guards). The scripted-adapter stub gained
+`SIGNEDOUT` and `ERRORED`, both routed through the plugin's **own** `_svcCantAnswer` rather
+than faking its `undef` — the standing/transient split lives in that sub, so a test
+hand-rolling the undef would pass whatever the sub did. Anti-tested ten ways; the one
+mutation that survived is what collapsed fix 1 to a single line.
+
+**`kvSet` now records the ITEMS, not just the TTL, and two assertions moved onto them.**
+`_streamResult` runs its *own* dedupe and `STREAM_MAX_RESULTS` cap on the way to the caller,
+so anything asserted against the rendered list cannot distinguish what `$resolve` did from
+what the renderer did — deleting `$resolve`'s dedupe entirely left the suite green. What is
+cached is `$resolve`'s own output and is what a later open replays, so that is what the
+dedupe and cap assertions now pin. Found by anti-testing the new tests rather than only the
+new code.
+
+### Downstream audit (what this change can reach)
+
+Both fixes are narrow, but this series' repeated failure mode is a change that quietly makes
+a branch unreachable or a discriminator meaningless, so every consumer was walked:
+
+- **`$inconclusive` has no consumer beyond the TTL and the log line.** Not feeding it for
+  standing failures therefore cannot reach anything else.
+- **One merge site, one adapter-invocation site, three `$finish` calls**, all inside
+  `_findPlayable` — there is no second resolver to keep in sync.
+- **Combined reviews are unaffected in their drop decision.** `_findPlayableReview`'s
+  `$requireAll` grep scans every index, so *whether* a side is exact is order-independent;
+  only which node leads a surviving side moves, and that moves the same way and for the same
+  reason as an ordinary review.
+- **`_dedupeStreamItems` → promotion → cap** is the order that makes fix 1 safe, and it is
+  now pinned: leg 1 filling the list past `STREAM_MAX_RESULTS` with leg 2's exact arriving
+  last still puts the exact on the row, because the promotion runs before the truncation.
+- **`_releaseAlts` follows the row** (its `%seen` is keyed on the primary's release key, so
+  it can never offer the row back), `_rebuildStreamItems` is order-preserving, and
+  `_retireOldStreamKeys` fires correctly on 23 → 24.
+- **A service that signs out between its own two legs** keeps leg 1's matches at
+  `STREAM_UNVALIDATED_TTL` and is *not* counted unavailable — the merge makes `$res` defined
+  before the standing branch is reached, which is right: there is a match to serve.
+
+**No matcher change** — none of the nine shared subs is touched, so this is PFR-only
+call-site logic. `matcher_sync_check.py` reports byte-identical drift with these changes
+stashed and applied, i.e. only the pre-existing fleet hold in ledger B.
 
 ## Status: 0.9.30
 **A service that cannot answer now says so. Found by diagnosing a live Tidal fault that
