@@ -42,7 +42,13 @@ BEGIN {
     package Slim::Utils::Cache;   sub new { bless {}, shift } sub get { undef } sub set { 1 }
     package Slim::Utils::Log;     use Exporter 'import'; our @EXPORT = qw(logger);
                                   sub logger { bless {}, 'T::Log' }
-    package T::Log;               our $AUTOLOAD; sub AUTOLOAD {} sub is_debug {0} sub is_info {0}
+    # `warn` is RECORDED rather than swallowed (0.9.32): the once-per-process suppression on
+    # a signed-out service is log VOLUME, so nothing about the answer can reveal it, and a
+    # regression there is ~150 identical lines in a single warm. Everything else still falls
+    # through AUTOLOAD and is discarded.
+    package T::Log;               our $AUTOLOAD; our @WARNED;
+                                  sub AUTOLOAD {} sub is_debug {0} sub is_info {0}
+                                  sub warn { shift; push @WARNED, join('', @_); return 1 }
     package Slim::Utils::Prefs;   use Exporter 'import'; our @EXPORT = qw(preferences);
                                   sub preferences { bless {}, 'T::Prefs' }
     package T::Prefs;             our $AUTOLOAD; sub AUTOLOAD {} sub get { undef } sub set {} sub init {}
@@ -161,6 +167,18 @@ sub fire_watchdog {
 }
 sub titles  { my $r = shift; map { $_->{_svctitle} // '' } @{ $r->{items} || [] } }
 sub queries { map { $_->{query} } @QUERIES }
+
+# Service-availability state is process-wide (0.9.32) and outlives a block, the same hazard
+# reset_all() clears for %RESOLVING — so a scenario that means "genuinely signed out" has to
+# SAY so rather than inherit it from whatever ran before.
+sub reset_svc { $B->can('_resetSvcAvailability')->() }
+# Put a service into the signed-out-long-enough-to-count state without waiting out
+# SVC_UNAVAILABLE_GRACE. Drives the REAL `_svcNoHandler` with an old timestamp, so the record
+# is created exactly as production creates it rather than poked into place.
+sub signed_out_long { $B->can('_svcNoHandler')->($_, time() - 86400) for @_; return 1 }
+sub reset_warns     { @T::Log::WARNED = (); return 1 }
+sub handler_warns   { return grep { /no API handler/ }            @T::Log::WARNED }
+sub standing_warns  { return grep { /treating it as signed out/ } @T::Log::WARNED }
 
 my $ALBUM  = 'This Mirror Weighs a Ton';
 my $SINGLE = 'This Mirror Weighs a Ton/See Out Loud';
@@ -491,12 +509,19 @@ print "\n3d. a signed-out service is out of the run, not an inconclusive answer\
     my $FOUND   = $B->can('STREAM_FOUND_TTL')->();
     ok('an inconclusive answer is retried sooner than a confirmed miss', $INCONC < $NOMATCH);
 
+    # EVERY "signed out" SCENARIO BELOW STATES THAT IT IS GENUINELY SIGNED OUT (0.9.32).
+    # Standing is now measured against SVC_UNAVAILABLE_GRACE rather than declared at the call
+    # site, so a service seen without a handler for the FIRST time is transient — correctly,
+    # that is the startup race. These assertions are about the settled state, so they seed it;
+    # section 3f covers the other side and the crossing.
+    reset_svc(); signed_out_long('Aqobuz');
     resolve('Interpol', $ALBUM,
         Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
         Btidal => { priority => 2, script => [ [], [] ] });
     is('one signed out, one really searched and missed -> a real no-match',
         ttl_written(), $NOMATCH);
 
+    reset_svc(); signed_out_long('Aqobuz', 'Btidal');
     resolve('Interpol', $ALBUM,
         Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
         Btidal => { priority => 2, script => ['SIGNEDOUT'] });
@@ -518,6 +543,7 @@ print "\n3d. a signed-out service is out of the run, not an inconclusive answer\
 
     # A signed-out service must not shorten an answer another service actually found,
     # and must not stop the fan-out reaching it.
+    reset_svc(); signed_out_long('Aqobuz');
     resolve('Interpol', $ALBUM,
         Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
         Btidal => { priority => 2, script => [ [ cand($ALBUM) ] ] });
@@ -529,9 +555,10 @@ print "\n3d. a signed-out service is out of the run, not an inconclusive answer\
     resolve('Interpol', $ALBUM, Qobuz => { script => ['SIGNEDOUT', [ cand($ALBUM) ] ] });
     is('a signed-out service is asked exactly once', scalar(queries()), 1);
 
-    # THREE ADAPTERS, THE UNAVAILABLE ONE IN THE MIDDLE. `$unavailable == @adapters` is an
-    # equality against the adapter COUNT, so a partial tally must not accidentally satisfy
+    # THREE ADAPTERS, THE UNAVAILABLE ONE IN THE MIDDLE. The "nobody searched" test counts
+    # UNAVAILABLE against the adapter COUNT, so a partial tally must not accidentally satisfy
     # it, and the fan-out (which only adapter 0 performs) still has to reach adapter 2.
+    reset_svc(); signed_out_long('Btidal');
     resolve('Interpol', $ALBUM,
         Aqobuz => { priority => 1, script => [ [], [] ] },
         Btidal => { priority => 2, script => ['SIGNEDOUT'] },
@@ -539,6 +566,7 @@ print "\n3d. a signed-out service is out of the run, not an inconclusive answer\
     is('one of three unavailable, the others really missed -> a real no-match',
         ttl_written(), $NOMATCH);
 
+    reset_svc(); signed_out_long('Aqobuz', 'Btidal', 'Cdeezr');
     resolve('Interpol', $ALBUM,
         Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
         Btidal => { priority => 2, script => ['SIGNEDOUT'] },
@@ -554,6 +582,276 @@ print "\n3d. a signed-out service is out of the run, not an inconclusive answer\
     is('signed out between legs still serves leg 1', (titles($mid))[0], $SINGLE);
     is('...at the unvalidated TTL, not counted unavailable',
         ttl_written(), $B->can('STREAM_UNVALIDATED_TTL')->());
+}
+
+# --- 3f. STANDING IS MEASURED, NOT DECLARED (0.9.32) ------------------------
+# 0.9.31 passed a literal `1` at the three `no API handler` sites, which is a claim about the
+# FUTURE that the call site cannot make. The same signature has two opposite causes:
+#
+#   signed out / never configured   -> STANDING. Repeats for ever (`_detectAdapters` gates on
+#       `->can()` and knows nothing about sign-in), so counting it transient costs an hourly
+#       re-resolve on every unmatched album, indefinitely. That is what 0.9.31 fixed.
+#   the STARTUP WARM ran before the service authenticated -> TRANSIENT, self-heals in seconds.
+#       Counting it standing pins real misses for 24h when nobody actually searched — live at
+#       EVERY server restart, which is what this section exists to stop.
+#
+# Both directions are pinned, because a fix for either one alone re-breaks the other.
+print "\n3f. a missing API handler is timed, not assumed permanent\n";
+{
+    my $noh   = $B->can('_svcNoHandler')   or die "no _svcNoHandler\n";
+    my $has   = $B->can('_svcHasHandler')  or die "no _svcHasHandler\n";
+    my $GRACE = $B->can('SVC_UNAVAILABLE_GRACE')->();
+    my $NOMATCH = $B->can('STREAM_NOMATCH_TTL')->();
+    my $INCONC  = $B->can('STREAM_INCONCLUSIVE_TTL')->();
+
+    # The window has to be long enough to cover plugin load + auth, and short enough that a
+    # startup misclassification would self-heal well inside a confirmed miss. Asserted as a
+    # RELATIONSHIP so a future retune cannot quietly land somewhere useless — same reasoning
+    # as WARM_RETRY_MAX's bound against WARM_INTERVAL.
+    ok('the grace window is a real duration',            $GRACE > 0);
+    ok('...and far shorter than a confirmed miss',       $GRACE * 10 < $NOMATCH);
+
+    # THE WINDOW ITSELF, driven at an injected clock so it does not take ten minutes.
+    reset_svc();
+    is('the FIRST sighting is not standing — it may be the startup race', $noh->('Q', 1000), 0);
+    is('...still not standing one second before the window closes',
+        $noh->('Q', 1000 + $GRACE - 1), 0);
+    is('...standing exactly AT the window',        $noh->('Q', 1000 + $GRACE), 1);
+    is('...and after it',                          $noh->('Q', 1000 + $GRACE * 10), 1);
+
+    # IT TIMES FROM THE FIRST SIGHTING, NOT THE LATEST. A resolve happens per album, so the
+    # record is re-stamped hundreds of times per warm; re-stamping it on every sighting would
+    # restart the clock for ever and the standing state would be unreachable.
+    reset_svc();
+    $noh->('Q', 1000); $noh->('Q', 1100); $noh->('Q', 1200);
+    is('repeated sightings do not restart the clock', $noh->('Q', 1000 + $GRACE), 1);
+
+    # A HANDLER APPEARING CLEARS IT, which is what makes the startup case self-heal rather
+    # than merely expire: the service signs in, the record goes, and a LATER outage is timed
+    # from its own beginning instead of inheriting the old one.
+    reset_svc();
+    $noh->('Q', 1000);
+    $has->('Q');
+    is('signing back in clears the record', $noh->('Q', 1000 + $GRACE), 0);
+    is('...and the new window is timed from the new sighting',
+        $noh->('Q', 1000 + $GRACE * 2), 1);
+    # Per service, not global — one signed-out service must not age another's window.
+    reset_svc();
+    $noh->('Q', 1000);
+    is('a second service starts its own clock', $noh->('T', 1000 + $GRACE), 0);
+    is('...while the first is already standing', $noh->('Q', 1000 + $GRACE), 1);
+
+    # THE FIX, END TO END, through the real resolver. Same scenario twice; only how long the
+    # service has been signed out differs, and that is the whole behavioural change.
+    reset_svc();
+    resolve('Interpol', $ALBUM,
+        Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
+        Btidal => { priority => 2, script => [ [], [] ] });
+    is('signed out only just now (the startup warm) -> transient, retried within the hour',
+        ttl_written(), $INCONC);
+
+    reset_svc(); signed_out_long('Aqobuz');
+    resolve('Interpol', $ALBUM,
+        Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
+        Btidal => { priority => 2, script => [ [], [] ] });
+    is('...the same shape once it is genuinely signed out -> a confirmed no-match',
+        ttl_written(), $NOMATCH);
+
+    # THE WARN IS SUPPRESSED ON THE FACT, NOT ON THE CLASSIFICATION, and only a VOLUME
+    # assertion can see it — nothing about the answer changes either way. Keying the
+    # once-per-process guard on `$standing` looks equivalent and is not: inside the grace
+    # window `$standing` is false, so the line fires for every album, which is the ~150
+    # identical lines per warm that 0.9.30's `$once` was added to remove. Found by
+    # anti-testing this section, which caught the code and missed this.
+    reset_svc(); reset_warns();
+    resolve('Interpol', $ALBUM, Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
+                                Btidal => { priority => 2, script => [ [], [] ] }) for 1 .. 3;
+    is('a service signed out INSIDE the grace window still warns only once',
+        scalar(handler_warns()), 1);
+
+    reset_svc(); signed_out_long('Aqobuz'); reset_warns();
+    resolve('Interpol', $ALBUM, Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
+                                Btidal => { priority => 2, script => [ [], [] ] }) for 1 .. 3;
+    is('...and once when it is genuinely signed out', scalar(handler_warns()), 1);
+}
+
+# --- 3g. THE WARN STATES WHAT HAPPENED, IT DOES NOT PREDICT A COUNT (0.9.32) -
+# `_svcCantAnswer` used to end its line "— counted unavailable" / "— counted inconclusive",
+# decided several steps before anything is counted. That claim can be plainly FALSE: when leg
+# 1 is holding matches, the merge in `$finish` makes `$res` defined, the row is cached as a
+# MATCH at STREAM_UNVALIDATED_TTL, and no no-match tally is touched at all — so the log
+# asserted one verdict for a run that reached the opposite one. Same root cause as the
+# five-carrier problem (a consumer re-deriving a classification made elsewhere), same cure.
+print "\n3g. the warn says what happened, not how it will be counted\n";
+{
+    my $UNVAL = $B->can('STREAM_UNVALIDATED_TTL')->();
+
+    # THE FINDING, VERBATIM. A service that signs out between its own two legs, with leg 1
+    # holding a match: the row really is stored as a MATCH, so any line claiming it was
+    # "counted unavailable" is describing a run that did not happen.
+    reset_svc(); reset_warns(); signed_out_long('Qobuz');
+    my $mid = resolve('Interpol', $ALBUM, Qobuz => { script => [ [ cand($SINGLE) ], 'SIGNEDOUT' ] });
+    is('the row really is stored as a match', ttl_written(), $UNVAL);
+    is('...and leg 1 is what it serves', (titles($mid))[0], $SINGLE);
+    ok('...so the warn claims NO count at all',
+        !grep { /counted/ } @T::Log::WARNED);
+    ok('...while still naming the service and the reason',
+        scalar(grep { /Qobuz.*no API handler/ } @T::Log::WARNED) >= 1);
+
+    # THE CROSSING IS ANNOUNCED, ONCE. The first line fires on the first sighting, which for
+    # the common case is during boot when "not authenticated yet" is the honest reading — so
+    # without a second line a service that never comes back is only ever reported as a
+    # transient startup blip, and the distinction 0.9.32 introduced is invisible to the user.
+    reset_svc(); reset_warns();
+    resolve('Interpol', $ALBUM, Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
+                                Btidal => { priority => 2, script => [ [], [] ] });
+    is('inside the grace window, nothing claims it is signed out',
+        scalar(standing_warns()), 0);
+    is('...but the outage itself is reported once', scalar(handler_warns()), 1);
+
+    reset_svc(); reset_warns(); signed_out_long('Aqobuz');
+    resolve('Interpol', $ALBUM, Aqobuz => { priority => 1, script => ['SIGNEDOUT'] },
+                                Btidal => { priority => 2, script => [ [], [] ] }) for 1 .. 3;
+    is('past the window it says so exactly once, not per album',
+        scalar(standing_warns()), 1);
+
+    # A SERVICE THAT RECOVERS RE-ARMS BOTH LINES. Holding the flags for the life of the
+    # process (0.9.30's shape) meant a service that failed at startup, signed in, then dropped
+    # out at noon warned NOTHING — the silent-service case the warn exists for. A second warn
+    # now costs a successful handler in between, so the volume is still bounded.
+    # THE FIRST OUTAGE MUST GO THROUGH `_svcCantAnswer`, or the warn flag is never set and
+    # the assertion cannot see the clearing at all. (It didn't, first time round: seeding via
+    # `_svcNoHandler` only records the TIMESTAMP, so the test passed against a build that had
+    # the clearing removed. Caught by anti-testing, and the premise was fixed, not the code.)
+    reset_svc(); reset_warns();
+    resolve('Interpol', $ALBUM, Zsvc => { script => ['SIGNEDOUT'] });
+    is('the first outage is reported', scalar(handler_warns()), 1);
+    resolve('Interpol', $ALBUM, Zsvc => { script => ['SIGNEDOUT'] });
+    is('...and not repeated while it persists', scalar(handler_warns()), 1);
+
+    $B->can('_svcHasHandler')->('Zsvc');               # the service signs back in
+    reset_warns();
+    resolve('Interpol', $ALBUM, Zsvc => { script => ['SIGNEDOUT'] });
+    is('a NEW outage after a recovery is reported again', scalar(handler_warns()), 1);
+}
+
+# --- 3e. THE TTL TABLE, ENUMERATED EXHAUSTIVELY (0.9.32) --------------------
+# WHY THIS IS NOT MORE SCENARIOS. Sections 3b/3c/3d are example-based, and examples cannot
+# see this series' actual failure mode: a fix that leaves a branch in place but makes it
+# UNREACHABLE, or a discriminator that is still read but no longer changes anything. 0.9.28
+# orphaned the inconclusive branch that way; 0.9.30 split standing from transient for the log
+# and left the TTL reading the old carrier. Both shipped green.
+#
+# `_streamTtl` is a pure function over a CLOSED enum, so the whole input space can be walked.
+# Two properties are pinned here, and the second is the one that stops the recurrence:
+#
+#   1. EQUIVALENCE — `_streamTtl` agrees with the 0.9.31 ladder in every cell. That is what
+#      makes the refactor safe to land on its own: it is a no-op by measurement, not by
+#      argument.
+#   2. COVERAGE — every TTL is still reachable, and every enum value still CHANGES some cell.
+#      A future edit that makes OUTCOME_UNAVAILABLE (say) indistinguishable from
+#      OUTCOME_ERRORED fails here, at the point of the mistake, instead of surfacing three
+#      releases later as a wrong TTL in the field.
+print "\n3e. the TTL table, enumerated\n";
+{
+    my $ttl = $B->can('_streamTtl') or die "no _streamTtl\n";
+    my ($A, $E, $U) = map { $B->can($_)->() } qw(OUTCOME_ANSWERED OUTCOME_ERRORED OUTCOME_UNAVAILABLE);
+    my $FOUND   = $B->can('STREAM_FOUND_TTL')->();
+    my $UNVAL   = $B->can('STREAM_UNVALIDATED_TTL')->();
+    my $INCONC  = $B->can('STREAM_INCONCLUSIVE_TTL')->();
+    my $NOMATCH = $B->can('STREAM_NOMATCH_TTL')->();
+
+    # THE ORACLE: the 0.9.31 ladder, transcribed from `$resolve` as it stood before the
+    # refactor, driven from the same outcomes. Deliberately written in terms of the OLD
+    # carriers ($unvalidated[$win] / $inconclusive / $unavailable) rather than by restating
+    # the new sub — a test that mirrors the implementation proves nothing.
+    my $old_ladder = sub {
+        my ($outcome, $nadapters, $win, $nitems) = @_;
+        my $unvalidated_win = defined $win && $outcome->[$win] ne $A;
+        my $inconclusive    = grep { $_ eq $E } @$outcome;
+        my $unavailable     = grep { $_ eq $U } @$outcome;
+        return $nitems       ? ($unvalidated_win ? $UNVAL : $FOUND)
+             : $inconclusive ? $INCONC
+             : $unavailable == $nadapters ? $INCONC
+             :                 $NOMATCH;
+    };
+
+    # Every outcome tuple of length $n, for 1..3 adapters — the real fleet maximum.
+    my $tuples = sub {
+        my ($n) = @_;
+        my @out = ([]);
+        for (1 .. $n) { @out = map { my $t = $_; map { [ @$t, $_ ] } ($A, $E, $U) } @out }
+        return @out;
+    };
+    # Every (tuple, win, nitems) the resolver can present: a winner at each index, and the
+    # no-winner case. `$win` is defined iff there are items, which the sub documents.
+    my @cells;
+    for my $n (1 .. 3) {
+        for my $t ($tuples->($n)) {
+            push @cells, [ $t, $n, undef, 0 ];
+            push @cells, [ $t, $n, $_, 1 ] for 0 .. $n - 1;
+        }
+    }
+
+    my @disagree = grep { $ttl->(@$_) != $old_ladder->(@$_) } @cells;
+    ok(sprintf('%d cells enumerated (1-3 adapters, every outcome tuple, every winner)',
+        scalar @cells), @cells == 141);
+    is('every cell agrees with the 0.9.31 ladder', scalar(@disagree), 0);
+    # Name the first disagreement rather than only counting, or a failure here says nothing
+    # about which shape moved.
+    ok('...and the first disagreement, if any, is named',
+        !@disagree || printf("     first: [%s] n=%d win=%s items=%d  new=%d old=%d\n",
+            join(',', @{ $disagree[0][0] }), $disagree[0][1],
+            (defined $disagree[0][2] ? $disagree[0][2] : '-'), $disagree[0][3],
+            $ttl->(@{ $disagree[0] }), $old_ladder->(@{ $disagree[0] })));
+
+    # The seven rows of the documented table, asserted by NAME so a failure reads as a
+    # behaviour rather than as a tuple index.
+    is('winner, leg 2 answered            -> found',    $ttl->([$A],     1, 0, 1), $FOUND);
+    is('winner, leg 2 errored             -> unvalidated', $ttl->([$E],  1, 0, 1), $UNVAL);
+    is('winner, leg 2 had no handler      -> unvalidated', $ttl->([$U],  1, 0, 1), $UNVAL);
+    is('no winner, a transient failure    -> inconclusive', $ttl->([$A,$E], 2, undef, 0), $INCONC);
+    is('no winner, every svc unavailable  -> inconclusive', $ttl->([$U,$U], 2, undef, 0), $INCONC);
+    is('no winner, one unavailable + one real miss -> nomatch',
+        $ttl->([$U,$A], 2, undef, 0), $NOMATCH);
+    is('no winner, all really missed      -> nomatch',  $ttl->([$A,$A], 2, undef, 0), $NOMATCH);
+    # The winner's OWN outcome decides: a service that hung while LOSING must not shorten a
+    # fully checked answer. This is the guard direction, and it is the one a "simplification"
+    # to "any unvalidated adapter" would break.
+    is('a hung service that LOST does not shorten the winner',
+        $ttl->([$A,$E], 2, 0, 1), $FOUND);
+
+    # COVERAGE 1 — every TTL is still reachable from some real combination. A constant no
+    # cell can produce is a branch that has quietly died.
+    my %seen; $seen{ $ttl->(@$_) }++ for @cells;
+    is('STREAM_FOUND_TTL is reachable',        ($seen{$FOUND}   ? 'y' : 'n'), 'y');
+    is('STREAM_UNVALIDATED_TTL is reachable',  ($seen{$UNVAL}   ? 'y' : 'n'), 'y');
+    is('STREAM_INCONCLUSIVE_TTL is reachable', ($seen{$INCONC}  ? 'y' : 'n'), 'y');
+    is('STREAM_NOMATCH_TTL is reachable',      ($seen{$NOMATCH} ? 'y' : 'n'), 'y');
+
+    # COVERAGE 2 — EVERY ENUM VALUE MUST STILL CHANGE SOMETHING. For each ordered pair of
+    # distinct values, there must be at least one cell where swapping one adapter's outcome
+    # from the first to the second moves the TTL. If any pair scores zero, those two values
+    # have become synonyms and the distinction between them is decorative — which is exactly
+    # the state 0.9.30 left `$standing` in for a whole release.
+    my %names = ($A => 'ANSWERED', $E => 'ERRORED', $U => 'UNAVAILABLE');
+    for my $from ($A, $E, $U) {
+        for my $to ($A, $E, $U) {
+            next if $from eq $to;
+            my $moves = 0;
+            CELL: for my $c (@cells) {
+                my ($t, $n, $win, $nitems) = @$c;
+                for my $i (0 .. $#$t) {
+                    next unless $t->[$i] eq $from;
+                    my @swapped = @$t; $swapped[$i] = $to;
+                    if ($ttl->(\@swapped, $n, $win, $nitems) != $ttl->($t, $n, $win, $nitems)) {
+                        $moves++; last CELL;
+                    }
+                }
+            }
+            ok("$names{$from} -> $names{$to} still changes the TTL somewhere", $moves > 0);
+        }
+    }
 }
 
 # --- 4. _releaseAlts: offer the rival, never adjudicate ---------------------

@@ -172,7 +172,19 @@ use constant STREAM_KEY_PREFIX       => 'pfr:stream:';
 # it worse to leave: those wrong answers sit next to no-match entries written at the
 # one-hour TTL that should have been a day, so a warm store is a mix of two defects.
 # PARSE_VERSION stays at 3 — no article parsing or fetching changed.
-use constant STREAM_KEY_VERSION      => 24;
+#
+# :24: -> :25: (0.9.32). AN OBSERVABILITY BUMP, NOT A CORRECTNESS ONE, and the distinction is
+# recorded because the two have different rules. Nothing under :24: names the wrong release —
+# no ranking or merge behaviour changed — so unlike 0.9.27's and 0.9.31's bumps this one is
+# not repairing stored answers. What it does is make the change VISIBLE: the entries 0.9.32
+# corrects are no-matches written at STREAM_NOMATCH_TTL by a warm that ran before a service
+# authenticated, and against a warm store those simply sit there until they expire, so the fix
+# would not be exercised on the first opens after the install. That is the standing dev-build
+# rule ([[dev-builds-clear-caches]]) doing its job rather than a defect being cleaned up, and
+# it is cheap here: a re-resolve, not a re-download.
+# PARSE_VERSION stays at 3 — still no article parsing or fetching change, so re-pulling
+# 17.5MB of articles would be cost with no test value.
+use constant STREAM_KEY_VERSION      => 25;
 
 # How long a coalescing slot may be joined before it is assumed wedged (see
 # _findPlayable). Comfortably past the worst honest resolve — four serial
@@ -221,6 +233,67 @@ use constant STREAM_INCONCLUSIVE_TTL => 3600;        # couldn't query a service 
 # expired entry (see the pump in _resolveSection) and validates it properly the moment the
 # service answers.
 use constant STREAM_UNVALIDATED_TTL  => 1 * 86400;   # matched, but the checking leg never answered
+
+# WHAT A SERVICE LEG DID — ONE CARRIER, NOT FIVE (0.9.32).
+#
+# This is a refactor with NO behaviour change, and it exists because the same defect kept
+# coming back in a new shape for four releases running. The concept "what did this service
+# actually do?" had FIVE independent carriers, and every fix added another instead of
+# reconciling them:
+#
+#   `defined $res && ref $res eq 'ARRAY'`  original — asked TWO different questions
+#   $inconclusive (counter)                original
+#   @unvalidated  (per-adapter array)      0.9.29, to re-derive what the merge had destroyed
+#   $standing     (literal at the call site) 0.9.30, for the log
+#   $unavailable  (counter)                0.9.31, to wire $standing into the TTL
+#
+# Each addition desynchronised the others. 0.9.28 moved the merge into `$finish`, which made
+# `$res` stop meaning "leg 2 answered", so 0.9.29 had to add carrier 3. 0.9.30 added carriers
+# 4 and 5 for the log alone, so 0.9.31 had to wire carrier 4 into the TTL. The review after
+# that found carrier 4 asserting a classification `$finish` may never apply, because the merge
+# can rewrite `$res` before the branch that counts it is reached.
+#
+# So: ONE value per adapter, recorded ONCE, in `$finish`, BEFORE the merge touches `$res` —
+# the merge is precisely what used to destroy the signal — and every consumer (the TTL, the
+# log) reads the record instead of re-deriving it from a proxy.
+#
+# ADDING A SIXTH BOOLEAN IS THE BUG, NOT THE FIX. If a future change needs to distinguish
+# something new about a leg, it belongs in this enum, not beside it.
+use constant OUTCOME_ANSWERED    => 'ANSWERED';      # searched and returned a list — `[]` IS a verdict
+use constant OUTCOME_ERRORED     => 'ERRORED';       # transient: may well answer on the next open
+use constant OUTCOME_UNAVAILABLE => 'UNAVAILABLE';   # STANDING: signed out, measured (see the grace note)
+
+# HOW LONG A MISSING API HANDLER MUST PERSIST BEFORE IT COUNTS AS SIGNED OUT (0.9.32).
+#
+# 0.9.31 decided this at the CALL SITE, with a literal `1` at the three `no API handler`
+# lines — a claim about the FUTURE that the call site cannot possibly make. A missing handler
+# has two completely different causes with the same signature:
+#
+#   the user is signed out / never configured   -> STANDING. Repeats for ever, because
+#       `_detectAdapters` gates on `->can()` and knows nothing about sign-in, so the adapter
+#       is in @adapters on every resolve. Counting it transient forces an hourly re-resolve
+#       on every unmatched album, 24x the traffic, indefinitely. That is 0.9.31's fix.
+#   the STARTUP WARM ran before the service authenticated -> TRANSIENT, and it self-heals
+#       within seconds. Counting it standing pins real misses at STREAM_NOMATCH_TTL (24h)
+#       when nobody actually searched — live at every server restart. The sibling LBF
+#       documents exactly this case ("no API handler at resolve time — e.g. the startup warm
+#       running before Qobuz/Tidal authenticated").
+#
+# SO IT IS MEASURED, NOT DECLARED. `%UNAVAIL_SINCE` records when a service was FIRST seen
+# without a handler, and is cleared the moment it has one; standing means "still gone after
+# the grace window". Inside the window the answer is TRANSIENT, which is the honest reading —
+# it may well answer on the next open, which is precisely what OUTCOME_ERRORED means.
+#
+# IN PROCESS MEMORY DELIBERATELY, not the kv store: the window is meant to be relative to
+# THIS process's uptime, because the startup race is a property of this process starting. A
+# restart re-opening the window is correct, not a bug — and it costs only that a genuinely
+# signed-out service takes the 1h TTL for the first ten minutes after a restart, during which
+# it makes no network calls at all (there is no handler to call with).
+#
+# 600s is sized to cover plugin load + authentication with a wide margin, and is bounded on
+# the other side by being far shorter than STREAM_NOMATCH_TTL.
+use constant SVC_UNAVAILABLE_GRACE => 600;
+
 use constant STREAM_SVC_TIMEOUT      => 8;           # per-service search watchdog (s)
 use constant STREAM_MAX_RESULTS      => 12;
 
@@ -2902,6 +2975,57 @@ sub _serveWaiters {
     }
 }
 
+# HOW LONG THE RESOLVE IS KEPT — ONE PURE FUNCTION OVER THE RECORDED OUTCOMES (0.9.32).
+#
+# Extracted from `$resolve`'s inline ladder deliberately, and the reason is the failure mode
+# this series keeps hitting: a fix makes a branch UNREACHABLE or a discriminator MEANINGLESS,
+# and no example-based test can see it (0.9.28 orphaned the inconclusive branch; 0.9.30 split
+# standing from transient for the log and left the TTL behind). A ladder inside a closure can
+# only be probed through whichever scenarios someone thought to write. A pure function over a
+# CLOSED enum can be enumerated exhaustively — every combination, plus a coverage assertion
+# that each enum value still changes some cell — so "this discriminator no longer does
+# anything" fails a test instead of shipping. See `t_releaserank.pl` section 3e.
+#
+# NO BEHAVIOUR CHANGE from the ladder it replaces. Worked cell by cell:
+#
+#   winner, leg 2 answered                     FOUND         (was: !$unvalidated[$win])
+#   winner, leg 2 errored/timed out/undef      UNVALIDATED   (was:  $unvalidated[$win])
+#   winner, leg 2 had no API handler           UNVALIDATED   (was:  $unvalidated[$win])
+#   no winner, any transient failure           INCONCLUSIVE  (was:  $inconclusive)
+#   no winner, every service unavailable       INCONCLUSIVE  (was:  $unavailable == @adapters)
+#   no winner, some unavailable + some missed  NOMATCH
+#   no winner, all really missed               NOMATCH
+#
+# The old `@unvalidated` already collapsed ERRORED and UNAVAILABLE into one flag
+# (`unless defined $res && ref $res eq 'ARRAY'`), so naming them separately costs nothing here
+# and is what lets the log stop lying about which one happened.
+#
+# THE WINNER'S OWN OUTCOME DECIDES, not the run's — a service that hung while LOSING the row
+# must not shorten a fully validated answer. `$win` is defined whenever `$nitems` is non-zero
+# (`$items` is `[]` unless it is), so that lookup is safe.
+#
+# `$nadapters` is passed rather than taken from `@$outcome` so the "not one service could
+# search" test cannot be fooled by a sparse array. With no adapters at all it answers
+# INCONCLUSIVE — matching the old `0 == 0`, and the right answer anyway, though
+# `_findPlayable` returns before this on that path.
+sub _streamTtl {
+    my ($outcome, $nadapters, $win, $nitems) = @_;
+
+    if ($nitems) {
+        return (($outcome->[$win] // '') eq OUTCOME_ANSWERED)
+            ? STREAM_FOUND_TTL : STREAM_UNVALIDATED_TTL;
+    }
+    # A transient failure anywhere means SOMETHING that could have answered did not, so the
+    # miss is not confirmed and is retried soon.
+    return STREAM_INCONCLUSIVE_TTL
+        if grep { ($_ // '') eq OUTCOME_ERRORED } @$outcome;
+    # Nobody searched at all. Not a verdict, so there is nothing to pin.
+    my $unavail = grep { ($_ // '') eq OUTCOME_UNAVAILABLE } @$outcome;
+    return STREAM_INCONCLUSIVE_TTL if $unavail >= $nadapters;
+    # At least one service really looked and had nothing. That is a confirmed miss.
+    return STREAM_NOMATCH_TTL;
+}
+
 # Resolve an album to playable streaming nodes. Calls back { items => [...] }.
 # $force skips the cache READ (still writes) so the "Refresh streaming match" row
 # can re-resolve past a stale no-match/wrong-match.
@@ -3040,29 +3164,28 @@ sub _findPlayable {
     # keeps most of the traffic saving, at the cost of one extra search per miss.
     my @result       = map { undef } @adapters;   # undef=pending, []=miss, [..]=match
     my $resolved     = 0;
-    my $inconclusive = 0;
-    # A SERVICE THAT IS SIGNED OUT IS OUT OF THE RUN, NOT AN INCONCLUSIVE ANSWER (0.9.31).
-    # `_svcCantAnswer`'s `$once` flag already distinguishes a STANDING state (no API handler
-    # — the plugin is installed but nobody is signed in) from a transient one (the search
-    # errored, the watchdog fired). 0.9.30 gave that distinction to the LOG and stopped
-    # there; the TTL side kept treating both as `$inconclusive`, so one signed-out service
-    # forced STREAM_INCONCLUSIVE_TTL on EVERY genuinely unmatched album — an hour instead of
-    # a day, 24x the resolve traffic, for as long as the user leaves it signed out. It never
-    # self-heals: `_detectAdapters` gates on `->can()` and knows nothing about sign-in, so
-    # the adapter is in `@adapters` on every resolve for ever.
+    # WHAT EACH SERVICE DID — the single carrier (see the OUTCOME_* constants for why there
+    # is exactly one). Per-adapter, written once in `$finish` before the merge, read by
+    # `_streamTtl` and by the log line below. Held in its own array rather than as a flag on
+    # the items: the items are what `_cacheStream` freezes and what the ListenLater handshake
+    # reads, and provenance has no business in either.
     #
-    # Counted SEPARATELY rather than simply not counted, because "nobody could search" is
-    # still not a verdict. A standing-unavailable service shortens the TTL only when EVERY
-    # adapter was unavailable — then no search happened at all and there is nothing to pin.
-    # If even one service really looked and missed, that is a real no-match and earns
-    # STREAM_NOMATCH_TTL.
-    my $unavailable  = 0;
-    # Per-adapter: this service's answer is leg 1's, kept because leg 2 never answered
-    # (see STREAM_UNVALIDATED_TTL). Held in its own array rather than as a flag on the
-    # items or as another $inconclusive: the items are what `_cacheStream` freezes and
-    # what the ListenLater handshake reads, and `$inconclusive` decides the EMPTY-result
-    # TTL and the "no match" log line — neither of which this is.
-    my @unvalidated;
+    # THE THREE VALUES ARE NOT INTERCHANGEABLE, and the distinctions are load-bearing:
+    #   ANSWERED    a verdict, even when the list is empty — it looked and had nothing to add
+    #   ERRORED     transient; it may well answer on the next open, so retry soon. Covers a
+    #               search that errored, a watchdog, a throw — AND a missing API handler that
+    #               has not yet outlasted SVC_UNAVAILABLE_GRACE, because during startup that
+    #               is exactly what it is: a service that has not authenticated YET.
+    #   UNAVAILABLE STANDING: no API handler, measured to have persisted past the grace
+    #               window, i.e. nobody is signed in. NOT an inconclusive answer:
+    #               `_detectAdapters` gates on `->can()` and knows nothing about sign-in, so
+    #               the adapter sits in @adapters on every resolve for as long as the user
+    #               leaves it signed out. Counting that as transient forced
+    #               STREAM_INCONCLUSIVE_TTL on every genuinely unmatched album — an hour
+    #               instead of a day, 24x the resolve traffic, indefinitely (0.9.31). But it
+    #               is not simply ignored either, because "nobody could search" is still not a
+    #               verdict: it shortens the TTL only when EVERY adapter was unavailable.
+    my @outcome;
 
     my $resolve = sub {
         return if $resolved;
@@ -3135,20 +3258,11 @@ sub _findPlayable {
         }
 
         $items = [ @{$items}[0 .. STREAM_MAX_RESULTS - 1] ] if @$items > STREAM_MAX_RESULTS;
-        # THE WINNER'S OWN PROVENANCE DECIDES, not the run's. `@unvalidated` is per-adapter
-        # and only the service that actually won the row is being stored, so a hung leg 2 on
-        # a service that lost (or was never consulted) must not shorten a fully validated
-        # answer. `$win` is defined whenever `@$items` is non-empty — `$items` is `[]` unless
-        # it is — so the lookup is safe inside this branch.
-        # `$unavailable == @adapters` is only ever evaluated on the no-match path, and
+        # ONE PURE FUNCTION DECIDES, over the recorded outcomes — see `_streamTtl`, which
+        # carries the whole truth table and the note on why it is not inline any more.
         # $resolve does not reach here until every adapter has reported (the loop above
-        # returns on the first undef `$result[$i]`), so it really does mean "not one
-        # service was able to search". With no adapters at all it is 0 == 0 — also true,
-        # also the right answer, though _findPlayable returns before this on that path.
-        my $ttl = @$items       ? ($unvalidated[$win] ? STREAM_UNVALIDATED_TTL : STREAM_FOUND_TTL)
-                : $inconclusive ? STREAM_INCONCLUSIVE_TTL
-                : $unavailable == @adapters ? STREAM_INCONCLUSIVE_TTL
-                :                 STREAM_NOMATCH_TTL;
+        # returns on the first undef `$result[$i]`), so @outcome is complete by construction.
+        my $ttl = _streamTtl(\@outcome, scalar(@adapters), $win, scalar(@$items));
         # A failed cache write must not take the ANSWER with it. The callers below are
         # waiting on a result we already hold; the worst case of not storing it is that the
         # next open re-resolves. (Same guard, same reason, as API.pm's fetch sites — see the
@@ -3158,13 +3272,19 @@ sub _findPlayable {
         # The exactness tag is 0.9.20 dry-run instrumentation on the EXISTING line, so it
         # costs no extra log volume while giving a corpus-wide count of how load-bearing
         # _albumMatches' looser tiers actually are.
+        # Counted off @outcome at the point of USE, so the line can never disagree with the
+        # TTL beside it — the two now read the same record rather than two counters kept in
+        # step by hand.
+        my $nErrored = grep { ($_ // '') eq OUTCOME_ERRORED }     @outcome;
+        my $nUnavail = grep { ($_ // '') eq OUTCOME_UNAVAILABLE } @outcome;
         _dbgv("resolve '$artistNorm / $albumNorm': "
             . (defined $win ? "matched on $adapters[$win]{name} (" . scalar(@$items) . ') '
                               . _matchExactness($album, $items->[0])
-                              . ($unvalidated[$win] ? ' UNVALIDATED (leg 2 never answered, '
-                                                      . STREAM_UNVALIDATED_TTL . 's)' : '')
-                            : "no match" . ($inconclusive ? " ($inconclusive inconclusive)" : "")
-                                         . ($unavailable  ? " ($unavailable unavailable)"   : "")
+                              . ((($outcome[$win] // '') ne OUTCOME_ANSWERED)
+                                    ? ' UNVALIDATED (leg 2 never answered, '
+                                      . STREAM_UNVALIDATED_TTL . 's)' : '')
+                            : "no match" . ($nErrored ? " ($nErrored inconclusive)" : "")
+                                         . ($nUnavail ? " ($nUnavail unavailable)"   : "")
                                          . ($ttl == STREAM_NOMATCH_TTL ? '' : " ttl=$ttl")));
 
         # THE WAITERS ARE SERVED BEFORE $callback, AND EACH ONE IS GUARDED. $callback
@@ -3208,11 +3328,27 @@ sub _findPlayable {
             return if $settled || $resolved;
             $settled = 1;
             Slim::Utils::Timers::killSpecific($svcTimer) if $svcTimer;
-            # $standing: this service cannot answer and will not be able to next time either
-            # (signed out). Only ever set by `_svcCantAnswer`'s `$once` sites — $runLeg's
+            # $standing: this service has had no API handler for longer than
+            # SVC_UNAVAILABLE_GRACE, i.e. it is genuinely signed out rather than mid-startup.
+            # MEASURED in `_svcCantAnswer`, never claimed by a call site (0.9.32). $runLeg's
             # watchdog and its eval-failure branch call $finish with one argument, so a
             # timeout or a throw stays transient, which is what they are.
             my ($res, $standing) = @_;
+
+            # RECORD WHAT THIS SERVICE DID — HERE, BEFORE THE MERGE, AND EXACTLY ONCE.
+            #
+            # The position is the whole fix. The merge below rewrites `$res` into the leg-1
+            # list, so every later test of `$res` is asking about the MERGED value while
+            # reading like it asks about the argument. That is what orphaned the inconclusive
+            # branch in 0.9.28, and what let `_svcCantAnswer` warn "counted unavailable" for a
+            # run where neither counter could possibly increment. Recorded up here, the value
+            # says what the service did and nothing downstream can quietly redefine it.
+            #
+            # An ARRAY is a verdict even when it is empty — the service looked and had nothing
+            # to add — which is why the test is on the ARGUMENT and never on `@leg1`.
+            $outcome[$i] = (defined $res && ref $res eq 'ARRAY') ? OUTCOME_ANSWERED
+                         : $standing                             ? OUTCOME_UNAVAILABLE
+                         :                                         OUTCOME_ERRORED;
             # MERGE, NEVER REPLACE. Leg 1's matches are real — they passed the same
             # `_albumMatches` gate — and the title query is a different search with its own
             # recall, so it can legitimately return FEWER rows than the artist query did,
@@ -3277,15 +3413,12 @@ sub _findPlayable {
                 # nothing to add, so leg 1's match stands fully validated and keeps the long
                 # TTL. That is the discriminator, and it is why this is tested on the ARGUMENT
                 # and not on `@leg1`.
-                $unvalidated[$i] = 1 unless defined $res && ref $res eq 'ARRAY';
                 $res = (defined $res && ref $res eq 'ARRAY') ? [ @leg1, @$res ] : [ @leg1 ];
             }
-            # undef = couldn't query the service (no handler / timeout / error /
-            # broken renderer) -> inconclusive (short-TTL retry), not a real miss.
-            # A STANDING inability (signed out) is a different thing and counts elsewhere —
-            # see the $unavailable note where it is declared.
+            # undef = couldn't query the service (no handler / timeout / error / broken
+            # renderer) -> not a real miss. Which KIND it was is already recorded above; this
+            # branch only has to publish the empty result and move the run along.
             if (!defined $res) {
-                $standing ? $unavailable++ : $inconclusive++;
                 $result[$i] = [];
                 $resolve->();
                 $fanOut->();
@@ -3628,8 +3761,8 @@ sub _rebuildStreamItems {
 # trace as one that was never asked: nothing.
 #
 # That is how a live Tidal fault stayed invisible. Four Tet's review title makes TIDAL's
-# search return 500 on every attempt; PFR correctly counts the service inconclusive, and
-# `$inconclusive` takes STREAM_INCONCLUSIVE_TTL instead of STREAM_NOMATCH_TTL — so that row
+# search return 500 on every attempt; PFR correctly records the service OUTCOME_ERRORED, and
+# `_streamTtl` takes STREAM_INCONCLUSIVE_TTL instead of STREAM_NOMATCH_TTL — so that row
 # re-resolves hourly instead of daily, at 5 searches a cycle, indefinitely. Nothing in PFR's
 # own log said why. The only evidence was a MISSING `search Tidal/albums` line beside the
 # other two services' present ones, and a `Plugins::TIDAL::API::Async … Error: 500` that
@@ -3647,17 +3780,88 @@ sub _rebuildStreamItems {
 # thing you wanted to read. Once per service per process says it exactly as often as it is
 # worth saying. (Same shape as the signed-out Spotty note in the ListenBrainz sibling.)
 my %CANT_ANSWER_WARNED;
+my %STANDING_WARNED;
+
+# WHEN EACH SERVICE WAS FIRST SEEN WITHOUT AN API HANDLER, since the last time it had one.
+# Keyed by SERVICE ALONE, and that is settled rather than a simplification: the streaming
+# account is held by the SERVER, not per player, so `getAPIHandler($client)`'s client
+# parameter is a calling convention and carries no per-player account state. See the
+# SVC_UNAVAILABLE_GRACE note for why this is measured at all.
+my %UNAVAIL_SINCE;
+
+# The service HAS a handler right now, so whatever we were timing is over. Called from the
+# three adapters immediately after the `unless ($api)` guard — HAVING A HANDLER IS THE
+# AVAILABILITY SIGNAL, which is why this is not hooked to a successful SEARCH instead: a
+# search can error for its own reasons while the user is perfectly well signed in.
+sub _svcHasHandler {
+    my ($svc) = @_;
+    # Forget EVERYTHING recorded about an outage, the warn flags included — the service is
+    # healthy, so a LATER outage is a new event and deserves to be reported as one. Keeping
+    # the flags process-wide (0.9.30's shape) meant a service that failed at startup, signed
+    # in, and then dropped out at noon warned exactly nothing, which is the silent-service
+    # case the warn exists for. Volume is still bounded: a second warn now costs a successful
+    # handler in between.
+    delete $UNAVAIL_SINCE{$svc};
+    delete $CANT_ANSWER_WARNED{$svc};
+    delete $STANDING_WARNED{$svc};
+    return 1;
+}
+
+# The service has NO handler right now. Records the first sighting and answers whether it has
+# been gone long enough to call STANDING rather than a startup race. `$now` is injectable so
+# the window is testable without waiting ten minutes — same pattern as `_topYear`/`_latestTtl`.
+sub _svcNoHandler {
+    my ($svc, $now) = @_;
+    $now = time() unless defined $now;
+    $UNAVAIL_SINCE{$svc} = $now unless defined $UNAVAIL_SINCE{$svc};
+    return (($now - $UNAVAIL_SINCE{$svc}) >= SVC_UNAVAILABLE_GRACE) ? 1 : 0;
+}
+
+# Test hook: this state is process-wide and outlives a block, the same hazard `reset_all`
+# already clears for %RESOLVING.
+sub _resetSvcAvailability {
+    %UNAVAIL_SINCE = (); %CANT_ANSWER_WARNED = (); %STANDING_WARNED = (); return 1;
+}
+
 sub _svcCantAnswer {
-    my ($svc, $why, $query, $collect, $standing) = @_;
-    $log->warn("resolve $svc: $why — counted " . ($standing ? 'unavailable' : 'inconclusive')
-             . " (q='" . ($query // '') . "')")
-        unless $standing && $CANT_ANSWER_WARNED{$svc}++;
-    # THE FLAG IS THE STANDING/TRANSIENT SPLIT, NOT JUST A LOG SWITCH (0.9.31). It was
-    # added in 0.9.30 to warn once about a state that repeats for ever instead of on every
-    # album; that "for ever" is precisely what makes it wrong to count as inconclusive, so
-    # the same flag now rides through $collect to $finish and decides the no-match TTL.
-    # Set at the three `no API handler (signed out?)` sites and nowhere else.
-    return $collect->(undef, $standing ? 1 : 0);
+    my ($svc, $why, $query, $collect, $noHandler) = @_;
+    # THE CALL SITE STATES A FACT; THE CLASSIFICATION IS COMPUTED HERE (0.9.32). The fifth
+    # argument used to be `$standing` — a hardcoded prediction that a missing handler will
+    # still be missing next time. It is now `$noHandler`, which is simply what the adapter
+    # observed, and whether that amounts to a STANDING inability is measured against the
+    # grace window instead of assumed.
+    my $standing = $noHandler ? _svcNoHandler($svc) : 0;
+
+    # THE WARN STATES WHAT HAPPENED. IT NO LONGER PREDICTS HOW IT WILL BE COUNTED (0.9.32).
+    #
+    # It used to end "— counted unavailable" / "— counted inconclusive", decided HERE, several
+    # steps before anything is counted. That claim can be plainly false: if leg 1 is holding
+    # matches, the merge in `$finish` makes `$res` defined, the row is stored as a MATCH at
+    # STREAM_UNVALIDATED_TTL, and no no-match tally is touched at all. So the line asserted a
+    # verdict for a run that reached the opposite one.
+    #
+    # It is the same root cause as the five-carrier problem this release exists to end — a
+    # consumer re-deriving a classification that is made elsewhere — so the cure is the same:
+    # say only what is known at this point, and let the ONE place that has the outcomes do the
+    # counting. `$resolve`'s `_dbgv` line reads @outcome directly and therefore cannot
+    # disagree with the TTL beside it. Per-album counting belongs at debug volume anyway;
+    # this line is at WARN because a service going quiet must announce itself (0.9.30).
+    $log->warn("resolve $svc: $why (q='" . ($query // '') . "')")
+    # SUPPRESSED ON THE FACT, NOT ON THE CLASSIFICATION. Keying the once-per-process guard on
+    # `$standing` would put a line in the log for every album for the whole grace window —
+    # ~150 per warm, which is exactly the noise 0.9.30's `$once` removed.
+        unless $noHandler && $CANT_ANSWER_WARNED{$svc}++;
+
+    # AND SAY SO ONCE MORE WHEN IT STOPS BEING A STARTUP RACE. The line above fires on the
+    # FIRST sighting, which for the common case is during boot, when the honest reading is
+    # still "not authenticated yet". Without this, a service that never comes back reports
+    # itself only as a transient startup blip and the user is never told the difference —
+    # which is the whole distinction 0.9.32 introduced. One extra line per outage episode.
+    $log->warn("resolve $svc: still unavailable after " . SVC_UNAVAILABLE_GRACE
+             . "s — treating it as signed out, not a startup race")
+        if $standing && !$STANDING_WARNED{$svc}++;
+
+    return $collect->(undef, $standing);
 }
 
 sub _dbgSearch {
@@ -3704,6 +3908,7 @@ sub _searchQobuz {
 
     my $api = Plugins::Qobuz::Plugin::getAPIHandler($client);
     unless ($api) { return _svcCantAnswer($svc, 'no API handler (signed out?)', $query, $collect, 1) }
+    _svcHasHandler($svc);   # it is signed in — close any grace window we were timing
 
     $api->search(sub {
         my $res = shift;
@@ -3753,6 +3958,7 @@ sub _searchTidal {
 
     my $api = Plugins::TIDAL::Plugin::getAPIHandler($client);
     unless ($api) { return _svcCantAnswer($svc, 'no API handler (signed out?)', $query, $collect, 1) }
+    _svcHasHandler($svc);   # it is signed in — close any grace window we were timing
 
     $api->search(sub {
         my $albums = shift;   # raw album hashes (type => albums)
@@ -3802,6 +4008,7 @@ sub _searchDeezer {
 
     my $api = Plugins::Deezer::Plugin::getAPIHandler($client);
     unless ($api) { return _svcCantAnswer($svc, 'no API handler (signed out?)', $query, $collect, 1) }
+    _svcHasHandler($svc);   # it is signed in — close any grace window we were timing
 
     $api->search(sub {
         my $albums = shift;

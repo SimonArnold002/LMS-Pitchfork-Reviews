@@ -121,6 +121,75 @@ its test. The whole 0.9.22–0.9.26 series is closed. Do not re-derive it.
   exact (the promotion is a no-op there, so order became the adjudicator). Both directions
   are pinned by sections 3c and 3d.
 
+- **A SERVICE LEG'S OUTCOME HAS EXACTLY ONE CARRIER — `@outcome` (0.9.32). A SIXTH BOOLEAN
+  IS THE BUG, NOT THE FIX.** This is the invariant that ends the 0.9.28→0.9.31 recurrence, so
+  read it before proposing anything in this area. The concept *"what did this service actually
+  do?"* used to have five independent carriers — `defined $res`, `$inconclusive`,
+  `@unvalidated`, the `$standing` literal at the call site, `$unavailable` — and each round's
+  fix added another instead of reconciling them, which is what desynchronised the rest:
+  0.9.28's merge made `$res` stop meaning "leg 2 answered" (so 0.9.29 added carrier 3);
+  0.9.30 added carriers 4 and 5 for the log alone (so 0.9.31 had to wire carrier 4 into the
+  TTL). **Now: one enum value per adapter — `OUTCOME_ANSWERED` / `OUTCOME_ERRORED` /
+  `OUTCOME_UNAVAILABLE` — recorded ONCE in `$finish`, BEFORE the merge rewrites `$res`, with
+  every consumer (`_streamTtl`, the log line) reading the record rather than re-deriving it.**
+  If a future change needs a new distinction about a leg, it belongs IN this enum, never
+  beside it. The position of the recording is load-bearing, not stylistic: recorded after the
+  merge, 11 assertions fail.
+
+- **STANDING UNAVAILABILITY IS MEASURED, NEVER DECLARED AT A CALL SITE (0.9.32).** Do not
+  restore a literal `$standing => 1` at the three `no API handler` lines. That flag is a claim
+  about the FUTURE, and the same signature has two opposite causes: genuinely signed out
+  (repeats for ever — `_detectAdapters` gates on `->can()` and knows nothing about sign-in) and
+  **the startup warm running before the service authenticated**, which self-heals in seconds
+  and which the sibling LBF documents in as many words. Declaring it pinned real misses at
+  `STREAM_NOMATCH_TTL` for 24h when nobody had searched, at every server restart. Now
+  `%UNAVAIL_SINCE` + `SVC_UNAVAILABLE_GRACE` (600s): the fifth argument states the FACT
+  (`$noHandler`), and `_svcCantAnswer` computes standing from how long it has persisted.
+  Inside the window the answer is `OUTCOME_ERRORED`, which is the honest reading — it may well
+  answer on the next open. **Keyed by SERVICE ALONE, and that is settled** — the streaming
+  account is held by the SERVER, not per player, so `getAPIHandler($client)`'s client
+  parameter is a calling convention carrying no per-player account state. Do not re-raise
+  per-client keying. **In process memory deliberately:** the window is meant to be relative to
+  this process's uptime, because the startup race is a property of this process starting.
+  **The clear hook is on HAVING A HANDLER, not on a successful search** — a search can error
+  while the user is perfectly well signed in. Both directions pinned by section 3f.
+- **THE WARN STATES WHAT HAPPENED; IT NEVER PREDICTS HOW IT WILL BE COUNTED (0.9.32).** Do
+  not restore the `— counted unavailable` / `— counted inconclusive` suffix. The
+  classification is made several steps later in `$finish`, and it can reach the OPPOSITE
+  verdict: when leg 1 holds matches the merge makes `$res` defined and the row is cached as a
+  MATCH at `STREAM_UNVALIDATED_TTL`, touching no no-match tally at all — so the line asserted
+  a count for a run that never happened. Same root cause as the five carriers (a consumer
+  re-deriving a classification made elsewhere), same cure: `$resolve`'s `_dbgv` does the
+  counting, reading `@outcome`, so it cannot disagree with the TTL beside it. `t_perf`'s
+  0.9.30 assertion demanding the word *inconclusive* is **deliberately superseded** by its
+  inverse, not dropped — what 0.9.30 cared about (a failed service leaves a trace naming
+  itself, the reason and the query) is unchanged and still pinned.
+- **A recovered service RE-ARMS both warn flags (0.9.32).** `_svcHasHandler` clears
+  `%CANT_ANSWER_WARNED` and `%STANDING_WARNED` along with the timer. Holding them for the life
+  of the process (0.9.30's shape) meant a service that failed at startup, signed in, then
+  dropped out at noon warned **nothing** — the silent-service case the warn exists for.
+  Volume stays bounded because a second warn now costs a successful handler in between.
+- **A second line marks the CROSSING into standing (0.9.32).** The first warn fires on the
+  first sighting, which for the common case is during boot when *"not authenticated yet"* is
+  the honest reading — so without it a service that never comes back is only ever reported as
+  a transient startup blip, and the distinction 0.9.32 introduced never reaches the user. Once
+  per outage episode, not per album.
+- **The `no API handler` warn is suppressed on the FACT, not the classification (0.9.32).**
+  `unless $noHandler && $CANT_ANSWER_WARNED{$svc}++`. Keying it on `$standing` looks equivalent
+  and is not: inside the grace window `$standing` is false, so the line fires for every album —
+  ~150 per warm, the exact noise 0.9.30's `$once` removed. Invisible in any answer, so it is
+  pinned by a VOLUME assertion (the harness now records `warn`). Found by anti-testing 3f,
+  which caught the code and missed this.
+- **`_streamTtl` IS PURE AND STAYS PURE (0.9.32).** Do not inline it back into `$resolve`.
+  Its whole purpose is that a closed enum can be enumerated: `t_releaserank.pl` section 3e
+  walks all 141 cells (1–3 adapters × every outcome tuple × every winner) against an
+  independently-written transcription of the 0.9.31 ladder, and adds a **coverage assertion**
+  that every TTL is still reachable and every enum value still changes some cell. That second
+  property is what catches this series' actual failure mode — a discriminator left in place
+  but made meaningless, which example-based scenarios cannot see (0.9.28 and 0.9.30 both
+  shipped green). Anti-tested: folding `UNAVAILABLE` into `ERRORED` *inside* `_streamTtl`
+  fails the two coverage assertions by name plus 8 equivalence cells.
+
 ### D. ADDING TO THIS LEDGER
 
 When a finding is declined, or accepted-but-deferred, add it here in the same
@@ -210,6 +279,172 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 0.9.32
+
+**Ends the 0.9.28→0.9.31 recurrence, in three deliberately separate steps:** a refactor with
+no behaviour change, then the one behavioural fix that falls out of it, then the log line that
+was making a claim it could not keep. Each landed with its own gate, so the fix could be
+judged against a baseline already proved inert.
+
+**The user-visible defect this fixes:** at every server restart, a warm that ran before a
+streaming service authenticated pinned genuinely unmatched albums at `STREAM_NOMATCH_TTL` —
+24 hours — on the strength of a service that never searched at all.
+
+### Why this exists
+
+The 0.9.31 review found the same defect returning in a fourth shape, and the shapes were
+symptoms rather than the problem. One concept — *what did this service leg do?* — had **five
+carriers**, and each round's fix added a sixth rather than reconciling them (full history in
+ledger section C). Every addition desynchronised the others, which is why the fixes were each
+locally correct and collectively a treadmill.
+
+### What changed
+
+`$inconclusive`, `$unavailable` and `@unvalidated` are replaced by one per-adapter `@outcome`
+(`OUTCOME_ANSWERED` / `OUTCOME_ERRORED` / `OUTCOME_UNAVAILABLE`), written **once, in `$finish`,
+before the merge rewrites `$res`** — the merge is precisely what used to destroy the signal.
+The TTL ladder becomes `_streamTtl`, a **pure function** over that record. The `_dbgv` line
+counts off the same array, so the log can no longer disagree with the TTL beside it.
+
+### Why it is safe to land now
+
+**The blast radius is one integer.** All three old carriers were read at five places, and
+`$ttl` reaches exactly two things: `_cacheStream` and a debug string. Matching, ordering,
+artwork, `_releaseAlts`, the ListenLater handshake, Material shelves and the warm pump read
+none of it.
+
+**And it is a no-op by measurement, not by argument.** `t_releaserank.pl` section 3e walks all
+**141 cells** — 1–3 adapters × every outcome tuple × every winner position — against an
+independently written transcription of the 0.9.31 ladder. Every cell agrees. The old
+`@unvalidated` already collapsed ERRORED and UNAVAILABLE into one flag, so naming them apart
+costs nothing here; it is what lets stage 3 stop the log lying.
+
+### Stage 2 — the defect itself: a missing API handler is now TIMED
+
+`$standing => 1` at the three `no API handler` sites is a claim about the FUTURE that a call
+site cannot make. The same signature has two opposite causes: genuinely signed out (repeats
+for ever) and **the startup warm running before the service authenticated**, which self-heals
+in seconds — a case the sibling LBF documents in as many words. Declaring it standing pinned
+real misses at `STREAM_NOMATCH_TTL` for 24h when nobody had actually searched, **at every
+server restart**.
+
+So it is measured: `%UNAVAIL_SINCE` records when a service was first seen without a handler
+and is cleared the moment it has one; standing means *still gone after
+`SVC_UNAVAILABLE_GRACE` (600s)*. The fifth argument to `_svcCantAnswer` is now `$noHandler` —
+a fact — and the classification is computed there. Inside the window the answer is
+`OUTCOME_ERRORED`, which is the honest reading rather than a special case: it may well answer
+on the next open, which is exactly what that value means.
+
+**The clear hook is on HAVING A HANDLER**, at the three `unless ($api)` guards, not on a
+successful search — a search can error while the user is perfectly well signed in.
+
+**`_streamTtl` and the whole table are UNTOUCHED by stage 2.** Only which outcome gets
+recorded changes, which is why the delta is one cell: *no winner, some service unavailable,
+another genuinely missed* goes 24h → 1h, and only while that service is inside its window.
+Confirmed empirically — running the stage-2 code against the stage-1 suite failed **exactly
+two** assertions, both that shape, and nothing else moved.
+
+### Stage 3 — the warn stops predicting a count
+
+The line ended `— counted unavailable` / `— counted inconclusive`, decided in
+`_svcCantAnswer`, several steps before anything is counted. That claim can be plainly false:
+when leg 1 holds matches the merge in `$finish` makes `$res` defined, the row is cached as a
+**match** at `STREAM_UNVALIDATED_TTL`, and no no-match tally is touched — so the log asserted
+one verdict for a run that reached the opposite one. **The behaviour is correct and
+deliberate** (there is a match to serve, and it was already pinned); only the line lied.
+
+It is the same root cause as the five carriers — a consumer re-deriving a classification made
+elsewhere — so the same cure: the warn states what happened, and `$resolve`'s `_dbgv` does the
+counting off `@outcome`, where it cannot disagree with the TTL beside it.
+
+```
+0.9.31  resolve Qobuz: no API handler (signed out?) — counted unavailable (q='Interpol')
+0.9.32  resolve Qobuz: no API handler (signed out?) (q='Interpol')
+        resolve Qobuz: still unavailable after 600s — treating it as signed out, not a startup race
+```
+
+Two things came with it, both from the grace window rather than the wording. **A second line
+marks the crossing into standing** — the first warn fires on the first sighting, which is
+usually during boot when *"not authenticated yet"* is the honest reading, so without it a
+service that never comes back is only ever reported as a startup blip and the distinction
+never reaches the user. And **`_svcHasHandler` now clears the warn flags too**: holding them
+for the life of the process meant a service that failed at startup, signed in, then dropped
+out at noon warned *nothing* — which is the silent-service case the warn exists for. Volume
+stays bounded because a second warn costs a successful handler in between.
+
+### Tests
+
+**970 → 1016, 0 failures** (`t_releaserank` 90 → 136, `t_perf` unchanged at 411). Section **3e** adds the
+141-cell enumeration, the seven named table rows, the winner-guard direction, and the
+**coverage assertion** — every TTL still reachable, every enum value still changes some cell —
+which is the one that catches a discriminator being made meaningless rather than removed.
+Section **3f** pins the grace window in both directions plus the crossing, the clear-on-handler
+behaviour, per-service isolation, and that repeated sightings do not restart the clock.
+
+Section **3g** pins the warn: that it claims no count *on the very run where the row is stored
+as a match* (the finding verbatim), that the crossing is announced once rather than per album,
+that nothing claims "signed out" inside the window, and that a recovered service can report a
+later outage.
+
+**Anti-tested FIFTEEN ways, every one caught** (failures across `t_releaserank` + `t_perf`).
+Stage 1: UNAVAILABLE folded in at the recording site 3; winner always FOUND 9; all-unavailable
+line deleted 4; the run's provenance replacing the winner's 3; UNAVAILABLE folded into ERRORED
+*inside* `_streamTtl` 7 — the two coverage assertions **by name** plus equivalence cells.
+Stage 2: standing declared at the call site (0.9.31) 2; never standing (pre-0.9.31) 4; the
+handler not clearing the window 1; the clock restarting on every sighting 9; a zero grace
+window 6; the warn suppressed on the classification 3. Stage 3: the `counted X` claim restored
+2; the crossing line removed 1; the crossing line unsuppressed 1; recovery not re-arming the
+warns 1.
+
+**TWO anti-tests found real holes rather than confirming coverage**, which is the point of
+running them and why both are recorded:
+
+- **A code hole the suite could not see.** Keying the warn suppression on `$standing` instead
+  of `$noHandler` passed the *entire* suite — inside the grace window that puts ~150 identical
+  lines in one warm, the exact noise 0.9.30 removed, and nothing about the *answer* can reveal
+  log volume. The harness now records `warn`; the mutation fails with the defect verbatim
+  (`-> '3'`).
+- **A TEST PREMISE THAT WAS WRONG BEFORE THE CODE WAS.** The first version of the
+  recovery-re-arms assertion seeded the outage through `_svcNoHandler`, which records only the
+  TIMESTAMP and never warns — so the warn flag was never set, and the test passed against a
+  build with the clearing removed. The premise was fixed, not the code; it now drives the
+  first outage through a real resolve.
+
+Called-vs-defined sweep: unresolved-name set byte-identical to `HEAD`
+(`_canonicalize_expiration_time`, `_max` — both pre-existing foreign calls); the four new subs
+(`_streamTtl`, `_svcNoHandler`, `_svcHasHandler`, `_resetSvcAvailability`) all resolve.
+`matcher_sync_check.py`: byte-identical drift stashed and applied, i.e. only the pre-existing
+fleet hold in ledger B. No matcher sub is touched.
+
+### Packaging
+
+**BUILT AND PACKAGED at 0.9.32.** `install.xml` and `repo.xml` both say 0.9.32, the zip is
+rebuilt (26 entries — 19 files + 7 directories, 285,800 bytes) and `repo.xml <sha>` recomputed
+to `645b5cf593941c1264e392fe3902d2f1ce7e6ff0`. Verified against the zip on disk rather than
+assumed: its `Browse.pm` and `install.xml` are byte-identical to the tree, it carries the fix,
+and it reads `STREAM_KEY_VERSION => 25`. `README.html`/`index.html` regenerated so the version
+badge (read live from `install.xml`) is not left lying. `README.md` and `CHANGELOG.md`
+deliberately untouched — those are written at the merge to main.
+
+**`STREAM_KEY_VERSION` 24 → 25, an OBSERVABILITY bump, not a correctness one**, and the
+distinction matters because the two have different rules. Nothing stored under `:24:` names
+the wrong release — no ranking or merge behaviour changed — so unlike 0.9.27's and 0.9.31's
+this is not repairing stored answers. It is there because the entries 0.9.32 corrects are
+no-matches written at the 24h TTL by a warm that ran before a service authenticated, and
+against a warm store those just sit until they expire: without the bump the fix would not be
+exercised on the first opens after the install. That is the standing dev-build rule doing its
+job, and it is cheap here — a re-resolve, not a re-download. **`PARSE_VERSION` stays at 3**;
+no article parsing or fetching changed, so re-pulling 17.5MB of articles would be cost with no
+test value.
+
+### What a user sees
+
+Nothing in the UI. Matching, ordering, artwork, `_releaseAlts`, the ListenLater handshake and
+the Material shelves are all untouched — the only behavioural change is how long one class of
+row is cached, and the only visible one is the log. Concretely: after a restart, a service that
+has not authenticated yet no longer pins real misses for 24 hours, and the log says once that
+the service is out and once more if it stays out.
 
 ## Status: 0.9.31
 **Two defects the 0.9.27–0.9.30 series left behind, both found by reviewing that series

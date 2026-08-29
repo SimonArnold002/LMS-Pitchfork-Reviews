@@ -2078,8 +2078,21 @@ $T::Prefs::P{svc_priority_deezer} = 3;
     is('...and it now WARNS, so the silence is over', scalar(@w), 1);
     ok('...naming the service and the query, which is what identifies the leg',
        ($w[0] // '') =~ /Qobuz/ && ($w[0] // '') =~ /Four Tet/);
-    ok('...and says what it cost — the inconclusive count is the reason the TTL drops',
-       ($w[0] // '') =~ /inconclusive/);
+    # 0.9.30 also asserted this line ENDED "— counted inconclusive". THAT PREMISE IS
+    # DELIBERATELY SUPERSEDED (0.9.32), not quietly dropped. The classification is made
+    # several steps later, in `$finish`, and it can reach the OPPOSITE verdict: when leg 1 is
+    # holding matches the merge makes `$res` defined and the row is cached as a MATCH at
+    # STREAM_UNVALIDATED_TTL, touching no no-match tally at all. So the line was asserting a
+    # count that need never happen — the same "a consumer re-derives a classification made
+    # elsewhere" defect as the five carriers 0.9.32 collapsed.
+    #
+    # What 0.9.30 actually cared about is unchanged and still pinned by the two assertions
+    # above: a service that failed leaves a trace naming itself, the reason and the query, so
+    # the silence is over. The counting now lives in `$resolve`'s `_dbgv`, which reads
+    # @outcome and therefore cannot disagree with the TTL beside it. The new rule is the
+    # inverse of the old one, and it is pinned here rather than left implicit.
+    ok('...and does NOT predict how it will be counted (0.9.32)',
+       ($w[0] // '') !~ /counted/);
 
     # THE GUARD DIRECTION: a healthy empty result is NOT an error and must stay quiet.
     # Collapsing the two would put a warn on every album a service simply doesn't carry.
