@@ -182,9 +182,19 @@ use constant STREAM_KEY_PREFIX       => 'pfr:stream:';
 # would not be exercised on the first opens after the install. That is the standing dev-build
 # rule ([[dev-builds-clear-caches]]) doing its job rather than a defect being cleaned up, and
 # it is cheap here: a re-resolve, not a re-download.
+#
+# :25: -> :26: (0.9.33). A CORRECTNESS BUMP, and a mandatory one. The fleet matcher sync
+# changed `_norm` itself — apostrophes now ELIDE instead of becoming a space, so "Jane's
+# Addiction" keys 'janes addiction' where :25: keyed 'jane s addiction' — and `%FOLD` grew
+# from 10 entries to ~90. EVERY normalised key in the store therefore changes, matched and
+# unmatched alike, so serving :25: entries under the new matcher would replay verdicts the
+# current code would not reach. `_albumMatches`' new compound-word tier compounds it: rows
+# cached as a confirmed no-match at STREAM_NOMATCH_TTL (24h) — the Rolling Stones' "England's
+# Newest Hit Makers" among them — now MATCH, and against a warm store they would otherwise
+# sit unmatched for a day after the install.
 # PARSE_VERSION stays at 3 — still no article parsing or fetching change, so re-pulling
 # 17.5MB of articles would be cost with no test value.
-use constant STREAM_KEY_VERSION      => 25;
+use constant STREAM_KEY_VERSION      => 26;
 
 # How long a coalescing slot may be joined before it is assumed wedged (see
 # _findPlayable). Comfortably past the worst honest resolve — four serial
@@ -3810,9 +3820,31 @@ sub _svcHasHandler {
 # The service has NO handler right now. Records the first sighting and answers whether it has
 # been gone long enough to call STANDING rather than a startup race. `$now` is injectable so
 # the window is testable without waiting ten minutes — same pattern as `_topYear`/`_latestTtl`.
+# MONOTONIC, NOT WALL CLOCK (0.9.33). The grace window is meant to be relative to THIS
+# process's uptime — that is the whole reason %UNAVAIL_SINCE lives in process memory rather
+# than the kv store (see the SVC_UNAVAILABLE_GRACE note) — and `time()` is not that.
+#
+# An RTC-less host is the case that matters, which is most of the fleet (Pi/dietpi): the
+# clock is restored at boot from the last shutdown stamp (fake-hwclock / timesyncd), then
+# NTP STEPS it forward to true time once the network is up. That step is the length of the
+# downtime, so a server left off overnight steps by hours — and it lands in precisely the
+# window this grace exists to cover, between the plugin's startup warm and the services
+# authenticating. Recording $UNAVAIL_SINCE before the step and comparing after it makes the
+# delta jump past SVC_UNAVAILABLE_GRACE, so a startup race is classified STANDING. It only
+# costs a wrong TTL in the MIXED case (one service authenticated and searching, another not
+# yet) because _streamTtl answers INCONCLUSIVE when every adapter is unavailable — but in
+# that case it flips INCONCLUSIVE to a 24h STREAM_NOMATCH_TTL pin on a miss nobody confirmed.
+#
+# CLOCK_MONOTONIC cannot step or run backwards. Falling back to time() where the platform
+# has no monotonic clock is no worse than what this replaces.
+my $HAVE_MONO = eval { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()); 1 } ? 1 : 0;
+sub _monoNow {
+    return $HAVE_MONO ? Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) : time();
+}
+
 sub _svcNoHandler {
     my ($svc, $now) = @_;
-    $now = time() unless defined $now;
+    $now = _monoNow() unless defined $now;
     $UNAVAIL_SINCE{$svc} = $now unless defined $UNAVAIL_SINCE{$svc};
     return (($now - $UNAVAIL_SINCE{$svc}) >= SVC_UNAVAILABLE_GRACE) ? 1 : 0;
 }
@@ -4117,6 +4149,23 @@ sub _albumMatches {
                 && ($ta eq $aa || index($ta, "$aa ") == 0);
     }
 
+    # COMPOUND-WORD / WORD-BOUNDARY variant: the two titles are identical once
+    # every space is removed -- e.g. MB "England's Newest Hit Makers" (the
+    # Rolling Stones' 1964 debut) vs the streaming spelling "England's Newest
+    # Hitmakers" ('hit makers' <-> 'hitmakers'). The services and MusicBrainz
+    # routinely disagree on whether a compound is one word or two, and no fold
+    # above sees a space as optional. EXACT space-collapsed equality ONLY -- no
+    # prefix rule here, because collapsing the spaces also destroys the word
+    # boundary that makes the prefix tiers safe (a prefix match on
+    # "hitmakers..." could then swallow an unrelated title). Length-gated so a
+    # short collapsed key can't collide by accident. Field: 2026-07-24.
+    # (Fleet matcher sync from the Discography plugin 0.50.6.)
+    if (!$ok) {
+        (my $as = $albumNorm) =~ s/\s+//g;
+        (my $ts = $t)         =~ s/\s+//g;
+        $ok = 1 if length($as) >= 6 && $ts eq $as;
+    }
+
     # Titles carrying the ARTIST NAME as a prefix on ONE side only - e.g. the
     # release "Belle and Sebastian Write About Love" vs the source title
     # "Write About Love". Strip a leading "<artist> " from both sides and
@@ -4194,9 +4243,31 @@ sub _artistMatch {
 # Diacritic folding for _norm (see the ListenBrainz plugin for the full rationale).
 my $HAVE_NFD = eval { require Unicode::Normalize; 1 } ? 1 : 0;
 my %FOLD = (
-    "\x{131}" => 'i', "\x{142}" => 'l', "\x{f8}" => 'o', "\x{f0}" => 'd',
-    "\x{111}" => 'd', "\x{fe}" => 'th', "\x{df}" => 'ss', "\x{e6}" => 'ae',
-    "\x{153}" => 'oe', "\x{127}" => 'h',
+    # ligatures and digraphs
+    "\x{e6}"  => 'ae', "\x{153}" => 'oe', "\x{df}"  => 'ss', "\x{fe}" => 'th',
+    "\x{133}" => 'ij', "\x{1c6}" => 'dz', "\x{1f3}" => 'dz', "\x{1c9}" => 'lj',
+    "\x{1cc}" => 'nj', "\x{223}" => 'ou', "\x{195}" => 'hv', "\x{1a3}" => 'oi',
+    # stroked / barred letters
+    "\x{f8}"  => 'o', "\x{111}" => 'd', "\x{142}" => 'l', "\x{127}" => 'h',
+    "\x{167}" => 't', "\x{180}" => 'b', "\x{19a}" => 'l', "\x{1e5}" => 'g',
+    "\x{23c}" => 'c', "\x{23f}" => 's', "\x{240}" => 'z', "\x{247}" => 'e',
+    "\x{249}" => 'j', "\x{24b}" => 'q', "\x{24d}" => 'r', "\x{24f}" => 'y',
+    "\x{1b6}" => 'z', "\x{2c65}" => 'a', "\x{2c66}" => 't', "\x{289}" => 'u',
+    "\x{268}" => 'i', "\x{275}" => 'o',
+    # hooked letters
+    "\x{253}" => 'b', "\x{188}" => 'c', "\x{256}" => 'd', "\x{257}" => 'd',
+    "\x{192}" => 'f', "\x{260}" => 'g', "\x{199}" => 'k', "\x{1ad}" => 't',
+    "\x{1a5}" => 'p', "\x{272}" => 'n', "\x{19e}" => 'n', "\x{288}" => 't',
+    "\x{28b}" => 'v', "\x{1b4}" => 'y', "\x{271}" => 'm',
+    # dotless, long-s, turned and archaic forms
+    "\x{131}" => 'i', "\x{17f}" => 's', "\x{140}" => 'l', "\x{138}" => 'k',
+    "\x{149}" => 'n', "\x{14b}" => 'n', "\x{1dd}" => 'e', "\x{259}" => 'e',
+    "\x{254}" => 'o', "\x{25b}" => 'e', "\x{25c}" => 'e', "\x{292}" => 'z',
+    "\x{250}" => 'a', "\x{26f}" => 'm', "\x{28a}" => 'u', "\x{26a}" => 'i',
+    "\x{283}" => 'sh', "\x{263}" => 'g', "\x{28c}" => 'v', "\x{280}" => 'r',
+    "\x{21d}" => 'g', "\x{1bf}" => 'w', "\x{1a8}" => 's', "\x{225}" => 'z',
+    "\x{221}" => 'd', "\x{234}" => 'l', "\x{235}" => 'n', "\x{236}" => 't',
+    "\x{237}" => 'j', "\x{f0}"  => 'd',
 );
 
 # Normalise a title/artist for fuzzy matching: decode octets, lowercase, fold
@@ -4272,6 +4343,35 @@ sub _norm {
     # for that duo literally carries "Layo + Bushwacka!".
     $s =~ s/[&+]/ and /g;
     $s =~ s/[\(\[].*?[\)\]]//g;
+
+    # APOSTROPHES ELIDE - they do NOT become a space. Every other mark handled
+    # by the [^\p{Alnum}] rule below SEPARATES words; an apostrophe sits INSIDE
+    # one, marking a contraction or a possessive, and both spellings of the same
+    # name are common in the wild.
+    #
+    # WHY (field via DSC, 2026-07-21): spacing it keyed "Jane's Addiction" as
+    # 'jane s addiction' against 'janes addiction'. `_artistMatch` is an
+    # exact-token SUBSET test, so the token 'janes' matched nothing on the other
+    # side and the act failed to match against EVERY source. Same for
+    # O'Connor/OConnor, D'Angelo/DAngelo, The B-52's/B-52s. This is the "!"
+    # fold's mandatory-artist-gate failure in another costume.
+    #
+    # LMS's own index agrees with eliding: it TOKENISES on the apostrophe
+    # (verified live - `artists search:Connor` returns "Sinead O'Connor"), so
+    # folding the mark away is the one choice that puts both spellings on a
+    # single key.
+    #
+    # GUARD - "'n'" contracting "and" is the exception, because there the mark
+    # joins two WORDS rather than sitting inside one. All three spellings agree
+    # TODAY ("Rock'n'Roll", "Rock 'n' Roll" and "Rock N Roll" all key
+    # 'rock n roll'); eliding blindly would key the first as 'rocknroll' and
+    # break a set that currently works. Space that one form first and the
+    # three-way agreement survives untouched.
+    # (Fleet matcher sync from the Discography plugin 0.44.26.)
+    my $apos = qr/['\x{2019}\x{2018}\x{02bc}\x{00b4}\x{2032}`]/;
+    $s =~ s/(?<=\w)${apos}n${apos}(?=\w)/ n /g;
+    $s =~ s/$apos//g;
+
     $s =~ s/[^\p{Alnum}]+/ /g;
     $s =~ s/^\s+//; $s =~ s/\s+$//;
     $s =~ s/\s+/ /g;

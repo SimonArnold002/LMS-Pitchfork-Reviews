@@ -16,13 +16,16 @@ binmode(STDOUT, ':encoding(UTF-8)');
 my $PFR = $ENV{PFR_BROWSE} || 'PitchforkReviews/Browse.pm';
 sub grab { my ($f,$n)=@_; open(my $fh,'<:encoding(UTF-8)',$f) or die $!;
     my $s=do{local $/;<$fh>}; $s =~ /\nsub \Q$n\E \{.*?\n\}\n/s or die "no sub $n"; return $&; }
+# %FOLD IS GRABBED, NOT RETYPED (0.9.33). It used to be a hand-copied 10-entry table here,
+# which the header above already called "no stubs" — and the fleet matcher sync then grew the
+# shipped table to ~90 entries while this copy stayed at 10. The duplicate would have gone on
+# passing against a fold that no longer existed, which is the same drift class the sync rule
+# exists to stop. Grab it from the module like every sub.
+sub grabFold { my ($f)=@_; open(my $fh,'<:encoding(UTF-8)',$f) or die $!;
+    my $s=do{local $/;<$fh>}; $s =~ /\nmy %FOLD = \(.*?\n\);\n/s or die "no %FOLD"; return $&; }
 eval "package X; use strict; use warnings; use utf8;\n"
-   . q{my $HAVE_NFD = eval \{ require Unicode::Normalize; 1 \} ? 1 : 0;
-my %FOLD = (
-    "\\x\{131\}" => 'i', "\\x\{142\}" => 'l', "\\x\{f8\}" => 'o', "\\x\{f0\}" => 'd',
-    "\\x\{111\}" => 'd', "\\x\{fe\}" => 'th', "\\x\{df\}" => 'ss', "\\x\{e6\}" => 'ae',
-    "\\x\{153\}" => 'oe', "\\x\{127\}" => 'h',
-);}
+   . q{my $HAVE_NFD = eval \{ require Unicode::Normalize; 1 \} ? 1 : 0;}
+   . grabFold($PFR)
    . grab($PFR,'_stripArtistAffix') . grab($PFR,'_svcYear') . grab($PFR,'_norm')
    . grab($PFR,'_asciiNorm') . grab($PFR,'_punctNorm') . "1;" or die $@;
 my ($p,$f)=(0,0);

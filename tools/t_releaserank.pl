@@ -175,7 +175,15 @@ sub reset_svc { $B->can('_resetSvcAvailability')->() }
 # Put a service into the signed-out-long-enough-to-count state without waiting out
 # SVC_UNAVAILABLE_GRACE. Drives the REAL `_svcNoHandler` with an old timestamp, so the record
 # is created exactly as production creates it rather than poked into place.
-sub signed_out_long { $B->can('_svcNoHandler')->($_, time() - 86400) for @_; return 1 }
+#
+# THE SEED MUST COME FROM THE SAME CLOCK THE PRODUCTION PATH READS (0.9.33). `_svcNoHandler`
+# now defaults `$now` to `_monoNow()` (CLOCK_MONOTONIC) rather than `time()`, because the
+# grace window is relative to process uptime and an RTC-less host steps the wall clock at
+# boot. Seeding with `time() - 86400` while the code under test compares against a monotonic
+# reading makes the delta wildly negative, so a service seeded as long-signed-out reads as
+# transient — which is exactly how these four assertions failed when the clock changed.
+sub mono_now { my $m = $B->can('_monoNow'); return $m ? $m->() : time() }
+sub signed_out_long { $B->can('_svcNoHandler')->($_, mono_now() - 86400) for @_; return 1 }
 sub reset_warns     { @T::Log::WARNED = (); return 1 }
 sub handler_warns   { return grep { /no API handler/ }            @T::Log::WARNED }
 sub standing_warns  { return grep { /treating it as signed out/ } @T::Log::WARNED }
@@ -610,6 +618,40 @@ print "\n3f. a missing API handler is timed, not assumed permanent\n";
     # as WARM_RETRY_MAX's bound against WARM_INTERVAL.
     ok('the grace window is a real duration',            $GRACE > 0);
     ok('...and far shorter than a confirmed miss',       $GRACE * 10 < $NOMATCH);
+
+    # THE CLOCK ITSELF IS PINNED (0.9.33), not just the arithmetic. Every assertion below
+    # injects $now, so all of them pass just as happily against a wall-clock default — the
+    # bug this guards is invisible to them. It is real: %UNAVAIL_SINCE is process memory and
+    # the window is meant to be process uptime, but an RTC-less host (most of the fleet)
+    # restores the clock at boot from the last shutdown and NTP then STEPS it forward, inside
+    # the very window the grace covers. A step longer than $GRACE makes a startup race read
+    # as STANDING and pins unconfirmed misses at 24h.
+    my $mono     = $B->can('_monoNow');
+    my $has_mono = eval { Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()); 1 } ? 1 : 0;
+    ok('a monotonic clock helper exists',                $mono ? 1 : 0);
+    if ($mono) {
+        my $a = $mono->(); my $b = $mono->();
+        ok('...that never runs backwards',               $b >= $a);
+        ok('...and is not wall-clock time',
+           $has_mono ? (abs($mono->() - time()) > $GRACE) : 1);
+    }
+
+    # PROBED AT THE CONSUMING END, which is the only version of this that works. The three
+    # assertions above pass unchanged if someone reverts `_svcNoHandler`'s default to time()
+    # and simply leaves `_monoNow` sitting unused in the file — verified by anti-test, so
+    # they prove the helper exists, not that the grace window reads it.
+    #
+    # So drive the real sub: seed the record with a WALL-CLOCK reading an hour past the
+    # window, then ask it again with NO $now so it falls back to its production default.
+    # Under CLOCK_MONOTONIC (counted from boot, a far smaller number) the delta is negative
+    # and the service is NOT standing; under time() the delta is exactly 3600 and it would
+    # be. The verdict therefore names the clock the sub actually reads.
+    if ($has_mono) {
+        reset_svc();
+        $noh->('clockprobe', time() - 3600);
+        ok('_svcNoHandler reads that clock, not time()',  $noh->('clockprobe') == 0);
+        reset_svc();
+    }
 
     # THE WINDOW ITSELF, driven at an injected clock so it does not take ten minutes.
     reset_svc();

@@ -52,9 +52,30 @@ does not cover. Say which ledger entry you are challenging and what changed.
 
 ### B. KNOWN-OPEN AND ACCEPTED — do not re-report as new
 
-- **`matcher_sync_check.py` exits 1 fleet-wide.** A known, deliberate hold while
-  DSC's provisional `_albumMatches` alias pass proves in the field. Not a
-  regression in this repo.
+- **A stale `%UNAVAIL_SINCE` record is NOT a defect — "Refresh streaming match" clears it
+  (withdrawn 0.9.32 review).** Raised as: the record is cleared only by `_svcHasHandler`, so
+  against a warm store a later outage could compute a delta of hours and be called STANDING at
+  age zero. Withdrawn on Simon's challenge, verified: `_refreshMatchRow` calls `_findPlayable`
+  with `$force`, the adapters run, any with a handler hit `_svcHasHandler` and DELETE the
+  record — and the same `$force` write rewrites the cached entry past the bad TTL. `Browse.pm:72`
+  already names that escape hatch. The scenario also needs a handler to appear AND vanish with
+  no resolve between, AND the new outage to be fast-self-healing. See
+  `docs/code-review-0.9.32.md`.
+- **The grace window's blast radius is BOUNDED by `_streamTtl`'s all-unavailable branch.**
+  A misclassified startup race does NOT pin "every unmatched album" at 24h — when every adapter
+  is UNAVAILABLE, `$unavail >= $nadapters` returns INCONCLUSIVE. It only bites in the MIXED
+  case (one service authenticated, another not yet). The 0.9.32 review got this wrong in both
+  findings; don't repeat the overstatement. Recorded in `docs/code-review-0.9.32.md`.
+- **`matcher_sync_check.py` exits 1 fleet-wide, and PFR is now on the AHEAD side
+  (0.9.33).** PFR took Discography's three settled matcher rules this session
+  (apostrophe elision, the ~90-entry `%FOLD`, the compound-word tier), so **DSC and
+  PFR are byte-identical on all nine shared subs** and the residual drift is LBF and
+  Search Hub being BEHIND. Simon's explicit scope calls: PFR only this session with
+  **LBF to follow**, and **Search Hub EXCLUDED entirely** — that repo is on hold with
+  no development, keeps the old `_norm`/`%FOLD` deliberately, and is to be hash-pinned
+  as a documented variant rather than ported. Do NOT report the remaining drift as a
+  PFR defect, and do NOT "fix" it by reverting PFR — the port is the intended
+  direction of travel. See [[shared-matcher-sync]].
 - **PFR will NOT get LBF's `_candReleaseType` single-drop filter (declined 0.9.27).**
   Proposed while fixing the Interpol wrong-match and rejected on live data. LBF can
   filter because MusicBrainz states the TARGET's release type; PFR has none —
@@ -279,6 +300,99 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 0.9.33
+
+**FLEET MATCHER SYNC — the three settled Discography rules ported into PFR.** The shared
+matching engine is one engine copied into five repos, and it had been deliberately frozen
+since 2026-07-29 while Discography's matcher rework churned. That work is now on hold, so
+Simon called the sync. **Scope this session is PFR ONLY** (LBF and Search Hub to follow),
+which is his explicit decision, not an oversight — see Review Ledger B.
+
+**What was ported, and the field failure each rule closes:**
+
+1. **Apostrophes ELIDE, they do not become a space** (from DSC 0.44.26). Spacing the mark
+   keyed `Jane's Addiction` as `jane s addiction` against `janes addiction`; `_artistMatch`
+   is an exact-token SUBSET test and the artist gate is MANDATORY, so the act matched
+   nothing from any source. Same for O'Connor/OConnor, D'Angelo/DAngelo, The B-52's/B-52s.
+   Six apostrophe variants (straight, curly, modifier, acute, prime, backtick). **The `'n'`
+   contraction is the guarded exception** — there the mark joins two WORDS, so it spaces
+   first and `Rock'n'Roll` / `Rock 'n' Roll` / `Rock N Roll` keep agreeing on `rock n roll`.
+2. **`%FOLD` 10 entries → ~90** (from DSC 0.44.26): ligatures/digraphs, stroked and hooked
+   letters, dotless/long-s/turned/archaic forms and IPA.
+3. **A COMPOUND-WORD tier in `_albumMatches`** (from DSC 0.50.6): two titles match when
+   identical with all whitespace removed. The Rolling Stones' 1964 debut is
+   *England's Newest **Hit Makers*** on MusicBrainz and *…**Hitmakers*** on the services.
+   **EXACT collapsed equality only, never a prefix** — collapsing spaces destroys the word
+   boundary the prefix tiers rely on, so a prefix rule would let `hitmakers…` swallow an
+   unrelated title. Length-gated at ≥6 chars; the artist gate still applies.
+
+**The `!` fold hole was NOT part of this** — it turned out to be already closed, fleet-wide,
+in **0.7.8 (2026-07-21)**. All five repos carry `s/(?<=\w)!(?=\w)/i/g` with the all-marks
+fallback that keeps `!!!` from normalising to empty and being rejected by that same artist
+gate. Standing memory said it was still open; the memory was five weeks stale and has been
+corrected. Asserted here as a regression so the new apostrophe rule sitting next to it cannot
+disturb it.
+
+**Cache: `STREAM_KEY_VERSION` 25 → 26, mandatory.** `_norm` itself changed, so every
+normalised key in the store changes — serving `:25:` entries under the new matcher would
+replay verdicts the current code would not reach. The compound-word tier compounds it: rows
+cached as a confirmed no-match at `STREAM_NOMATCH_TTL` (24h) now MATCH, and against a warm
+store they would otherwise sit unmatched for a day after the install. `PARSE_VERSION` stays
+at 3 — no parsing or fetching change, so re-pulling 17.5MB of articles would be cost with no
+test value.
+
+**Gate: `tools/t_matchersync.pl` (new, 41 assertions)**, each rule pinned by the failure that
+motivated it rather than a synthetic case. **Anti-tested, all three independently
+load-bearing:** reverting the apostrophe block fails 6, the old 10-entry `%FOLD` fails 8,
+removing the compound tier fails 3. The NEGATIVES were anti-tested too — making the tier a
+prefix rule fails the "Hitmakers Live" and different-albums assertions, and dropping the
+length gate fails the <6-char assertion. All 13 suites green (1057 assertions).
+
+**One harness trap worth keeping.** The fold assertions failed first time round for exactly
+the sub-256 codepoints (`ð`, `æ`, `ó`) and passed for everything above U+00FF. Perl only sets
+the UTF8 flag on a literal carrying a codepoint above U+00FF, and `_norm` folds only inside
+`if ($HAVE_NFD && utf8::is_utf8($s))` — so an unflagged fixture silently SKIPS the fold and
+fails against perfectly good code. Live input is decoded from the services' JSON and always
+arrives flagged. Fixtures now go through an upgrading helper.
+
+**`t_svctitle.pl` no longer carries a hand-copied `%FOLD`.** Its header claimed "the REAL
+`_norm`/`%FOLD` chain grabbed from Browse.pm — no stubs" while holding a duplicate 10-entry
+table, which this sync would have left stale and silently passing. It now grabs the table from
+the module like every sub. (Not itself load-bearing — its fixtures don't need the new folds —
+it just no longer lies.)
+
+**ALSO IN 0.9.33 — the grace window reads a MONOTONIC clock (0.9.32 code-review finding,
+folded in here rather than cut as its own build; full round in `docs/code-review-0.9.32.md`).** `_svcNoHandler` defaulted `$now` to `time()` while
+`SVC_UNAVAILABLE_GRACE`'s own note says the window is relative to THIS process's uptime — which
+is the whole reason `%UNAVAIL_SINCE` lives in process memory rather than the kv store. On an
+RTC-less host (most of the fleet) the clock is restored at boot from the last shutdown stamp
+and NTP then STEPS it forward once the network is up, by the length of the downtime, inside
+the exact window the grace exists to cover. A step past the window makes a startup race read
+as STANDING. Blast radius is narrower than first reported — `_streamTtl` answers INCONCLUSIVE
+when EVERY adapter is unavailable, so a pure startup race was never at risk — but in the mixed
+case (one service authenticated and searching, another not yet) it flips INCONCLUSIVE to a 24h
+`STREAM_NOMATCH_TTL` pin on a miss nobody confirmed. Now `_monoNow()` (CLOCK_MONOTONIC, with a
+documented `time()` fallback where the platform has none).
+
+**Two things the tests caught doing it, both worth keeping in mind:**
+- **Clock mixing is a real hazard, not just harness noise.** 3f's `signed_out_long` seeded
+  `%UNAVAIL_SINCE` with `time() - 86400` while the code under test had moved to a monotonic
+  reading, so the delta went hugely NEGATIVE and a service seeded as long-signed-out read as
+  transient — 4 assertions red. Anything that WRITES that hash must use the clock that READS it.
+- **The obvious assertion was vacuous.** Checking that `_monoNow` exists and never goes
+  backwards passes unchanged if someone reverts `_svcNoHandler`'s default to `time()` and
+  leaves the helper unused in the file (verified by anti-test: 139/139 green on that revert).
+  The assertion now PROBES AT THE CONSUMING END — seed on the wall clock, call with no `$now`,
+  and let the verdict name the clock the sub actually reads. Both revert shapes now fail.
+
+**Sync state after this session:** DSC and PFR are byte-identical on all nine shared subs.
+`matcher_sync_check.py` still exits 1, reporting LBF and Search Hub as BEHIND. **LBF is the
+only one that will be ported** — Search Hub is on hold with no development (Simon, 2026-08-29)
+and stays on the old `_norm`/`%FOLD` deliberately. Because the check compares SH, it cannot
+reach exit 0 while SH is frozen, so the LBF session must ALSO hash-pin SH's `_norm`/`%FOLD`
+into the script's `VARIANTS` table the way LL is pinned — pinned rather than deleted from
+`FILES`, so an unannounced SH change still trips the alarm.
 
 ## Status: 0.9.32
 
