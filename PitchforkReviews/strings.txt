@@ -18,6 +18,45 @@ PLUGIN_PITCHFORKREVIEWS_HSA
 	EN	High Scoring Albums
 	NL	Hoog Gewaardeerde Albums
 
+PLUGIN_PITCHFORKREVIEWS_YEAR
+	EN	Best Albums of the Year
+
+PLUGIN_PITCHFORKREVIEWS_YEAR_LABEL
+	EN	%s - Best Albums
+
+PLUGIN_PITCHFORKREVIEWS_HOME_YEAR_LABEL
+	EN	Pitchfork: %s - Best Albums
+
+PLUGIN_PITCHFORKREVIEWS_SECTION_OPTIONS
+	EN	Options
+
+PLUGIN_PITCHFORKREVIEWS_SECTION_STREAMING
+	EN	Streaming
+
+PLUGIN_PITCHFORKREVIEWS_SECTION_REVIEW
+	EN	Review
+
+PLUGIN_PITCHFORKREVIEWS_SECTION_ENTRY
+	EN	About this album
+
+PLUGIN_PITCHFORKREVIEWS_PICK_YEAR
+	EN	Choose a year
+
+PLUGIN_PITCHFORKREVIEWS_READ_LIST
+	EN	Read the full list
+
+PLUGIN_PITCHFORKREVIEWS_SORTED_BY
+	EN	Sorted by %s (tap to change)
+
+PLUGIN_PITCHFORKREVIEWS_SORT_RANK
+	EN	Best first
+
+PLUGIN_PITCHFORKREVIEWS_SORT_COUNTDOWN
+	EN	Countdown
+
+PLUGIN_PITCHFORKREVIEWS_HOME_YEAR
+	EN	Pitchfork: Best Albums of the Year
+
 PLUGIN_PITCHFORKREVIEWS_HOME_BNM
 	EN	Pitchfork: Best New Music
 	NL	Pitchfork: Beste Nieuwe Muziek
@@ -42,6 +81,9 @@ PLUGIN_PITCHFORKREVIEWS_EMPTY
 	EN	No reviews found (check the feed URL in the log)
 	NL	Geen reviews gevonden (check de feed URL in log info)
 
+PLUGIN_PITCHFORKREVIEWS_LOADING
+	EN	%s of %s matched - still loading
+
 PLUGIN_PITCHFORKREVIEWS_READ_REVIEW
 	EN	Read the full review
 	NL	Lees de volledige review
@@ -61,6 +103,12 @@ PLUGIN_PITCHFORKREVIEWS_WEEK
 PLUGIN_PITCHFORKREVIEWS_NO_MATCH
 	EN	No streaming match found
 	NL	Geen streaming match gevonden
+
+PLUGIN_PITCHFORKREVIEWS_ALSO_REVIEWED
+	EN	Also covered by this review
+
+PLUGIN_PITCHFORKREVIEWS_ALSO_RELEASED
+	EN	Another release with this name
 
 PLUGIN_PITCHFORKREVIEWS_GENRE
 	EN	Genre

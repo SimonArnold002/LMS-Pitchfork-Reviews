@@ -1,11 +1,12 @@
 package Plugins::PitchforkReviews::HomeExtras;
 
-# Material Skin home-page scrollable rows. Three shelves, each its own
+# Material Skin home-page scrollable rows. Four shelves, each its own
 # HomeExtraBase subclass (own tag -> own CLI dispatch -> own feed; separate
 # packages avoid any shared per-class feed state):
-#   - Best New Music       (PFRBnm     -> Browse::homeBnm)
-#   - High Scoring Albums  (PFRHsa     -> Browse::homeHsa)
-#   - Latest Reviews       (PFRReviews -> Browse::homeReviews)
+#   - Best New Music              (PFRBnm     -> Browse::homeBnm)
+#   - High Scoring Albums         (PFRHsa     -> Browse::homeHsa)
+#   - Latest Reviews              (PFRReviews -> Browse::homeReviews)
+#   - Best Albums of the Year     (PFRYear    -> Browse::homeYear)
 # Each feed returns a FLAT card list that does not vary by request quantity, so
 # deep home-shelf playback resolves the right item (see Browse::homeReviews for
 # the item_id / quantity-stability rule).
@@ -32,9 +33,11 @@ sub initPlugin {
         extra => { title => 'PLUGIN_PITCHFORKREVIEWS_HOME_BNM', icon => ICON, needsPlayer => 0 },
     );
 
-    # High Scoring Albums + Latest Reviews (own packages, below)
+    # High Scoring Albums + Latest Reviews + Best Albums of the Year
+    # (own packages, below)
     Plugins::PitchforkReviews::HomeHsa->initPlugin();
     Plugins::PitchforkReviews::HomeReviews->initPlugin();
+    Plugins::PitchforkReviews::HomeYear->initPlugin();
 }
 
 sub feed {
@@ -92,6 +95,32 @@ sub initPlugin {
 sub feed {
     my ($client, $cb, $args) = @_;
     Plugins::PitchforkReviews::Browse::homeReviews($client, $cb, $args);
+}
+
+
+package Plugins::PitchforkReviews::HomeYear;
+
+use strict;
+use base qw(Plugins::MaterialSkin::HomeExtraBase);
+
+use Plugins::PitchforkReviews::Browse;
+
+sub initPlugin {
+    my ($class) = @_;
+    $class->SUPER::initPlugin(
+        feed  => \&feed,
+        tag   => 'PFRYear',
+        extra => {
+            title       => 'PLUGIN_PITCHFORKREVIEWS_HOME_YEAR',
+            icon        => Plugins::PitchforkReviews::HomeExtras::ICON,
+            needsPlayer => 0,
+        },
+    );
+}
+
+sub feed {
+    my ($client, $cb, $args) = @_;
+    Plugins::PitchforkReviews::Browse::homeYear($client, $cb, $args);
 }
 
 1;
