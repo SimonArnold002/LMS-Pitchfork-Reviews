@@ -1,6 +1,10 @@
 package Plugins::PitchforkReviews::Settings;
 
 # Settings page: streaming-service search priorities + the debug-log toggle.
+#
+# Per-view reading choices (how the review lists are grouped, how the year list is
+# ordered) are NOT here — they are tap-to-change rows on the views themselves, the
+# same convention as the sibling ListenBrainz plugin's sort toggles.
 
 use strict;
 use base qw(Slim::Web::Settings);
@@ -14,7 +18,10 @@ sub name { 'PLUGIN_PITCHFORKREVIEWS' }
 sub page { 'plugins/PitchforkReviews/settings.html' }
 
 sub prefs {
-    return ($prefs, qw(svc_priority_qobuz svc_priority_tidal svc_priority_deezer group_by debug_log));
+    # NB `group_by` is deliberately absent: since 0.8.2 the grouping mode is flipped
+    # by the "Grouped by …" row on the review views themselves (the fleet convention
+    # for per-view reading choices), not here. The pref itself is unchanged.
+    return ($prefs, qw(svc_priority_qobuz svc_priority_tidal svc_priority_deezer debug_log));
 }
 
 sub handler {
@@ -39,12 +46,6 @@ sub handler {
             }
         }
 
-        # Grouping mode is a fixed enum — keep the current value on any unexpected
-        # (or absent) POST rather than writing garbage into the pref.
-        my $gb = $params->{pref_group_by};
-        unless (defined $gb && ($gb eq 'date' || $gb eq 'genre')) {
-            $params->{pref_group_by} = $prefs->get('group_by') // 'date';
-        }
     }
 
     return $class->SUPER::handler($client, $params);
