@@ -239,6 +239,7 @@ transcript will be rediscovered as a finding within days.
 - **Choose your services** — set the Qobuz / Tidal / Deezer search order (or turn one off).
 - **Material home shelves** — Best New Music, High Scoring Albums and Latest Reviews as scrollable rows on the Material home page.
 - **Add to Listen Later** — matched albums carry what the companion *Listen Later* plugin needs to save & replay them.
+- **Dutch** — the whole plugin is translated, so an LMS set to Dutch reads in Dutch throughout.
 - **Smart matching** — folds stylised spellings (*WOR$T* = *Worst*, *P!nk* = *Pink*) and a trailing EP/LP so more reviews resolve to a playable album; where an artist has an album and a single sharing a name, the reviewed record wins the row.
 - **Not the right album? Change it** — when a service carries another release under the same name, it's offered right there on the album page, alongside a Refresh that re-searches from scratch.
 
@@ -300,6 +301,61 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 0.9.34
+**Dutch (NL) translations — the plugin's first second language. Community contribution
+(PR #2, Blackfiction), brought forward to the current string set. No code change.**
+
+### What the PR needed before it could land
+
+The PR was opened against the **0.7.11-era** `strings.txt` (34 keys). `dev` is on 46, so a
+straight merge was wrong in both directions — and the merge that was attempted by hand shows
+exactly that: 49 keys, 33 NL lines.
+
+- **18 keys added since 0.7.11 had no translation** — the whole Best Albums of the Year
+  feature (`YEAR`, `YEAR_LABEL`, `HOME_YEAR`, `HOME_YEAR_LABEL`, `PICK_YEAR`, `READ_LIST`,
+  `SORTED_BY`, `SORT_RANK`, `SORT_COUNTDOWN`), the four `SECTION_*` headers, `LOADING`,
+  `ALSO_REVIEWED`, `ALSO_RELEASED`, `GROUPED_BY` and `GROUP_WEEK`. Translated here.
+- **Three keys the PR translated NO LONGER EXIST** — `GROUP_BY`, `GROUP_BY_DATE` and
+  `GROUP_BY_DESC` were retired at **0.8.2**, when the grouping control moved off the settings
+  page and onto the view. Merging the PR reinstates them as dead keys, and the long
+  `GROUP_BY_DESC` translation describes a settings radio that is no longer there. Dropped.
+- **Two artefacts cleaned out of the submitted text**: a trailing space on
+  `PLUGIN_PITCHFORKREVIEWS`, and two **zero-width spaces (U+200B)** inside the
+  `GROUP_BY_DESC` sentence. The second one matters beyond tidiness — an invisible codepoint
+  in a translated string is exactly the kind of thing that survives review and then makes a
+  label fail to compare equal somewhere downstream.
+
+### Checks, since there is no test suite for strings
+
+`strings.txt` has no coverage in `tools/` and adding a suite for a data file was not in
+scope, so the file was verified mechanically instead: **46 keys, 46 `EN` lines, 46 `NL`
+lines**; every key's `%s` count identical between its EN and NL line (the four format
+strings — `YEAR_LABEL`, `HOME_YEAR_LABEL`, `SORTED_BY`, `GROUPED_BY`, `LOADING` — are what a
+mistranslation breaks at `sprintf`); valid UTF-8; no trailing whitespace, no NBSP, no ZWSP.
+The key SET is byte-identical to 0.9.33's, so no token can have been renamed or lost.
+
+### NO CACHE BUMP, and it is checked rather than assumed
+
+`STREAM_KEY_VERSION` stays at **26** and `PARSE_VERSION` at **3**. The standing dev rule is
+that a build must be observable against a warm store, and this one is: **nothing cached
+carries a localised string.** Rows are assembled at render (`cachetime => 0`), section
+headers are built per render, and the one cached-looking case — the "No matching album
+found" placeholder — is built by `_streamResult` from the raw cached items on every call
+(`Browse.pm:3690`), not stored. A bump would cost a full re-resolve to observe a change that
+is already visible on the next open.
+
+### Packaging
+
+**BUILT AND PACKAGED at 0.9.34.** `install.xml` and `repo.xml` both say 0.9.34, the zip is
+rebuilt (26 entries — 19 files + 7 directories, 290,162 bytes) and `repo.xml <sha>` recomputed
+to `661405cd2ed1aac0be0247f7f8b1d953c1bbff87`. Verified against the zip on disk rather than
+assumed: its `strings.txt`, `Browse.pm`, `API.pm`, `Plugin.pm` and `install.xml` are all
+byte-identical to the tree, and the zipped `strings.txt` carries all 46 NL lines.
+`README.md` gains a Dutch row in the features table and `README.html`/`index.html` are
+regenerated so the version badge (read live from `install.xml`) is not left lying.
+`CHANGELOG.md` deliberately untouched — that is written at the merge to main, where the
+credit to Blackfiction belongs alongside it.
 
 ## Status: 0.9.33
 

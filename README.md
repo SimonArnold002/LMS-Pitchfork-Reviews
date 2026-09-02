@@ -25,6 +25,7 @@ Tested on LMS 9.x with the **Material Skin** (the classic skin works for the bas
 | **Material home shelves** | Best New Music, High Scoring Albums, Latest Reviews and Best Albums of the Year as scrollable rows on the Material home page | Material Skin · **Play: a streaming plugin** |
 | **Add to Listen Later** | Matched albums carry the data the *Listen Later* plugin needs to save & replay them | Listen Later plugin + a streaming plugin |
 | **Choose your services** | Set the search order for Qobuz / Tidal / Deezer (or turn one off) | A streaming plugin |
+| **Dutch** | Every label, row and setting in Dutch when LMS is set to that language, alongside English | Nothing |
 
 **"A streaming plugin" means Qobuz, Tidal or Deezer** — installed in LMS and signed in. Reading the lists, the capsules and the genres needs nothing beyond the plugin itself, but **playing an album always goes through one of those three services**: the plugin has no audio of its own and does not download anything. A review it can't match to a service you have still appears, with its Pitchfork artwork and a link to the review — it just isn't playable.
 
