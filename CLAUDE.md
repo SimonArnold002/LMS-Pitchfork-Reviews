@@ -247,7 +247,32 @@ transcript will be rediscovered as a finding within days.
 
 **Install:** add `https://simonarnold002.github.io/LMS-Pitchfork-Reviews/repo.xml` in LMS → Settings → Plugins.
 
-### Latest per-release post (0.8.0 — covers 0.7.10 → 0.8.0)
+### Latest per-release post (0.9.34 — covers 0.7.11 → 0.9.34, the main-channel release)
+
+🎵 What's new in Pitchfork Reviews — for Lyrion Music Server (LMS)
+
+Every December, Pitchfork counts down the fifty best albums of the year — and it's one of those lists you mean to work through and never quite do, because reading it and playing it are two different jobs. That list is now a section in the plugin. It opens on the newest one published, each entry with its cover, its write-up and a tap to play the album from Qobuz, Tidal or Deezer, and every year back to 2016 is behind the "Choose a year" row. It looks after itself, too: the plugin works out which list is the newest rather than having it hardcoded, so when this December's goes live it just becomes the one you land on.
+
+The rest of this release went into the half of the job you can't see. A review that played the wrong album and a review that couldn't play at all looked identical from the outside — both just sat there — so the fixes here are mostly things you'll notice by their absence. Interpol's *This Mirror Weighs a Ton* was quietly playing the two-track single instead of the album released the same day. Any artist with an apostrophe in their name — Jane's Addiction, Sinéad O'Connor, The B-52's — matched nothing whatsoever. A review with an "&" in its title could never resolve. And the year-end lists turned out never to have been stored at all, so every single open re-downloaded a 1.7MB article; they now live in a proper database, which took start-up from 206 seconds to 39.
+
+✨ What's new
+• Best Albums of the Year — Pitchfork's annual top-50, ranked and playable, with every year back to 2016, and a fourth home shelf to match
+• Read it your way — #1 at the top, or Pitchfork's own 50-to-1 countdown order
+• Grouping moved onto the list — switch between genre and week dividers with a tap, and it now applies to all three review lists
+• Reviews that cover two records — a review titled "A / B" resolves both releases instead of neither
+• Not the right album? — another release under the same name is offered right there, and Refresh finally works from a matched row
+• Read the review you matched — a matched album shows its full write-up, instead of only showing it when nothing was found
+• Dutch — the whole plugin is translated, thanks to Blackfiction
+• Much smarter matching — apostrophes, "&", compound titles, stylised spellings and albums buried by a common-word artist name all resolve now
+• Faster and quieter — lists are kept in a real database, artwork is fetched at the size it's drawn at, and a signed-out service no longer drags everything else down with it
+
+Works on LMS 9.x, best with the Material Skin. For playback you'll need at least one of Qobuz, Tidal or Deezer installed and signed in. Free and open source.
+
+👉 Full details & install: https://simonarnold002.github.io/LMS-Pitchfork-Reviews/
+
+#LyrionMusicServer lms squeezebox pitchfork qobuz tidal deezer selfhosted
+
+### Superseded per-release post (0.8.0 — covers 0.7.10 → 0.8.0)
 
 🎵 What's new in Pitchfork Reviews — for Lyrion Music Server (LMS)
 

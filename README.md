@@ -21,6 +21,8 @@ Tested on LMS 9.x with the **Material Skin** (the classic skin works for the bas
 | **Genres** | Each review shows its Pitchfork genre(s) on the row and detail page | Nothing |
 | **Read the full review** | Links out to Pitchfork; the plugin shows only artist, album, date, genre and the short capsule | Nothing |
 | **Refresh** | A row at the top of each list re-fetches the feed and re-matches on demand | Nothing |
+| **Not the right album?** | Where a service carries another release under the same name it is offered on the album page, alongside a Refresh that re-searches from scratch | A streaming plugin |
+| **Reviews covering two records** | A review titled *A / B* — a pair issued together — resolves both; the first plays from the row, the second rides into the drill-in | A streaming plugin |
 | **Grid or list view** | Every row carries artwork, so Material's thumbnail/grid toggle stays available | Material Skin |
 | **Material home shelves** | Best New Music, High Scoring Albums, Latest Reviews and Best Albums of the Year as scrollable rows on the Material home page | Material Skin · **Play: a streaming plugin** |
 | **Add to Listen Later** | Matched albums carry the data the *Listen Later* plugin needs to save & replay them | Listen Later plugin + a streaming plugin |
@@ -130,3 +132,7 @@ Open **Plugin Settings** from the top of the plugin's page (or **Settings → Ad
 - **Matching stylised titles.** The matcher folds decorative spellings so, e.g., *WOR$T* matches *Worst* and *P!nk* matches *Pink*, and tolerates a trailing "EP"/"LP" that streaming services drop. A few reviews genuinely can't be matched — e.g. when a service abbreviates a title to an initialism the review spells out — and are left showing their Pitchfork cover.
 - **Add to Listen Later.** A matched album carries a proper `favorites_url` (service + album id), so the companion **Listen Later** plugin can save it and replay it from the right service. Adding directly from a browse row uses a Material feature that ships in **Material 6.4.4+**.
 - **AllMusic** reviews are planned for a future version; today the source is Pitchfork.
+
+---
+
+Full release history: [CHANGELOG.md](CHANGELOG.md).
