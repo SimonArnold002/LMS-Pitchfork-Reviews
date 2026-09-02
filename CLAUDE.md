@@ -3805,6 +3805,9 @@ repo.xml         # <extensions> (plural — repo-install manifest)
     false-match wildly, so it's left as an accepted miss.
 
 ### Services & the streaming cache round-trip (IMPORTANT)
+
+**ADDING A NEW SERVICE — READ `LMS-ListenBrainz-New-Releases/docs/streaming-adapter-spec.md` FIRST.** It is the adapter contract across the released plugins (LBF, PFR, LL): what a service's own plugin must expose (R1-R8), the leg semantics (`undef` = inconclusive vs `[]` = a real miss, and the TTL each picks), the item fields to stamp, the acceptance tests, and — per plugin — every site that still forces an edit OUTSIDE the adapter table, with the registry field that closes it. **This repo's two: the `_rebuildStreamItems` chain (`Browse.pm:3696`), and the `_orderedAdapters` memo key (`Browse.pm:2174`), which is built from a fixed `qw(qobuz tidal deezer)` — build it from the table BEFORE adding a fourth service, or that service's priority changes will not invalidate the memo.**
+
 **Qobuz + Tidal + Deezer** (Bandcamp not ported — manual/loop-blocking). Priorities on
 the settings page (`svc_priority_qobuz|tidal|deezer`; 0 = never; lower = searched
 first). **The subtle bit — album nodes carry a CODEREF `url` that Storable can't
