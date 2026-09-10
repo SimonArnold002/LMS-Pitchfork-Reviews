@@ -29,6 +29,47 @@ while the rounds ran.*
 them only if you have genuinely NEW information — a case the recorded reasoning
 does not cover. Say which ledger entry you are challenging and what changed.
 
+### DECLINED / SETTLED INDEX — GREP THIS FIRST
+
+**One grep before reporting any finding.** Search this table for the symbol or subject the
+finding is about, then grep the phrase in the last column to jump to the entry. A hit means it
+is already decided: read the entry and either drop the finding, or answer its stated reason
+with new evidence. Do not re-report it as new. Phrases are used instead of line numbers
+because line numbers rot on the next edit.
+
+| already decided | § | find it with |
+|---|---|---|
+| THE FLEET FOLD IS DELIBERATELY NOT LEVEL, 2026-09-10 to the completion of item 1 in | A2 | `THE FLEET FOLD IS DELIBERATELY NOT LEVEL,` |
+| The zip is not rebuilt and `repo.xml <sha>` is not recomputed in the working | A2 | `The zip is not rebuilt and `repo.xml <sha>`` |
+| `CHANGELOG.md` and `README` are written at the MERGE TO MAIN, not on dev | A2 | ``CHANGELOG.md` and `README` are written at` |
+| A large uncommitted working tree, where present, is deliberate | A2 | `A large uncommitted working tree, where` |
+| PFR's matcher copies follow the fleet rule | A2 | `PFR's matcher copies follow the fleet rule` |
+| Genre/rank grouping is deliberately NOT run through `_groupedRows` | A2 | `Genre/rank grouping is deliberately NOT run` |
+| Tuning values are not defects | A2 | `Tuning values are not defects` |
+| A stale `%UNAVAIL_SINCE` record is NOT a defect — "Refresh streaming match" clears it | B | `A stale `%UNAVAIL_SINCE` record is NOT a` |
+| The grace window's blast radius is BOUNDED by `_streamTtl`'s all-unavailable branch | B | `The grace window's blast radius is BOUNDED by` |
+| `matcher_sync_check.py` exits 1 fleet-wide, and PFR is now on the AHEAD side | B | ``matcher_sync_check.py` exits 1 fleet-wide,` |
+| PFR will NOT get LBF's `_candReleaseType` single-drop filter (declined 0.9.27) | B | `PFR will NOT get LBF's `_candReleaseType`` |
+| The Refresh row is NOT defeated by a captured closure (withdrawn 0.9.28) | B | `The Refresh row is NOT defeated by a captured` |
+| `_wantsTitleRetry` will NOT be widened with `_matchExactness` (declined 0.9.29) | B | ``_wantsTitleRetry` will NOT be widened with` |
+| The Qobuz search payload's `release_type` availability is UNVERIFIED | B | `The Qobuz search payload's `release_type`` |
+
+**Two standing rules that kill most repeat findings:**
+
+1. **Name the WRITER, not just the branch.** A hand-built input proves the branch, never the
+   population. If nothing upstream can reach a guarded branch, say so in the finding instead
+   of reporting it as live.
+2. **A comment is not the contract.** Where a comment claims an invariant the code does not
+   enforce, the comment is the defect. Fix the prose and pin the behaviour in a suite.
+
+### HOW TO LOG A VERDICT so the next round finds it
+
+Every new decision goes in §A2 (declined), §B (accepted/open) or §C (closed) as a bullet whose
+FIRST LINE names the **symbols** a future review would grep for, then the verdict, then the
+date and who decided. Add a row to the index above in the same edit. State the reason as a
+fact that can be DISPROVEN ("no service returns X"), never as "unlikely" — a rarity claim
+invites the next round to find one counter-example and reopen the whole entry.
+
 ### A. NOT FINDINGS — deliberate, fleet-wide
 
 - **THE FLEET FOLD IS DELIBERATELY NOT LEVEL, 2026-09-10 to the completion of item 1 in
