@@ -6,7 +6,9 @@
     <plugin name="PitchforkReviews" version="0.9.34" minTarget="9.0.0" maxTarget="*">
       <title lang="EN">Pitchfork Reviews</title>
       <desc lang="EN">Browse Pitchfork album reviews in Lyrion Music Server and play the album from your streaming library</desc>
+      <category>musicservices</category>
       <url>https://simonarnold002.github.io/LMS-Pitchfork-Reviews/PitchforkReviews.zip</url>
+      <icon>https://raw.githubusercontent.com/SimonArnold002/LMS-Pitchfork-Reviews/main/PitchforkReviews/HTML/EN/plugins/PitchforkReviews/html/images/PitchforkReviewsIcon.png</icon>
       <creator>CrystalGipsy</creator>
       <email></email>
       <!-- On EVERY zip rebuild: bump the version (install.xml + here) AND recompute
