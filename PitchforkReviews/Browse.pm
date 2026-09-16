@@ -1814,16 +1814,55 @@ sub _attachReviewLink {
     };
 }
 
-# Second line: "date · genre - truncated capsule" (each part dropped if absent).
+# Pitchfork's review score, rendered for DISPLAY ONLY as "8.4/10" (0.9.40).
+#
+# WHY THIS IS THE SECTION TEST. Asked for on the three review sections (Best New Music,
+# High Scoring Albums, Latest Reviews) and NOT on the year-end lists, which have no score
+# to show. No section plumbing is needed to draw that line: `_parseYear` sets
+# `score => undef` on every year entry it builds (API.pm, "year-end lists carry no score")
+# and the DB column is NULLABLE for exactly that reason, so `defined` already separates the
+# two shapes. A ranked row can never reach the true branch.
+#
+# `defined`, NOT truthiness. Pitchfork really does award 0.0 (Jet, *Shine On*), and a
+# truth test would silently drop precisely the score most worth reading.
+#
+# sprintf %.1f because the site's own idiom is one decimal throughout — JSON gives back a
+# bare 10 or 8 for a round score, and "10/10" next to "8.4/10" reads as a different scale.
+# The pattern guard is what keeps a non-numeric out of sprintf: `ratingValue.score` is
+# whatever the page's state happens to hold, and an unexpected string would otherwise
+# render as "0.0/10" — a real score that was never awarded.
+sub _scoreLabel {
+    my ($it) = @_;
+    my $s = ($it || {})->{score};
+    return '' unless defined $s && !ref $s && $s =~ /^\d+(?:\.\d+)?$/;
+    return sprintf('%.1f/10', $s);
+}
+
+# Second line: "score · date · genre - truncated capsule" (each part dropped if absent).
 # On a year-end row the leading meta is the YEAR instead of the date: every entry
 # in a list shares one publication date, so repeating it down all 50 rows says
 # nothing, while the year is what the row is actually about.
+#
+# THE SCORE GOES HERE, ON line2, AND MUST NEVER MOVE TO line1/name. A Pitchfork row that
+# matched on SPOTIFY carries no `&al=` handshake — `_attachFavUrl` is skipped wholesale for
+# a `native_favurl` adapter, and decorating the favurl is settled as wrong (CLAUDE.md A2) —
+# so ListenLater stores that row's LABEL as the album title. Measured on plex:9000:
+# `favorites_title "The Cure - Mixed Up"`, High Scoring Albums. Anything added to the label
+# lands in LL's database; line2 is read by nothing on its add path. line1 is byte-for-byte
+# unchanged by this feature, in every section, matched or not.
+#
+# AND IT IS DISPLAY ONLY in the other direction too: `_line2` is called from the two
+# `_reviewRow` returns and nowhere else. It feeds no cache key, no favurl and no search —
+# the streaming resolver queries `$it->{artist}` / `$it->{album}`, which this never touches.
+# Material's own search-within-list DOES scan the subtitle (search-list.js reads title AND
+# subtitle), but that line already carries the date, the genre and the capsule prose, so the
+# score adds no surface that was not already there.
 sub _line2 {
     my ($it) = @_;
     my $cap = $it->{capsule} // '';
     $cap = substr($cap, 0, ROW_CAPSULE_MAX) . '...' if length($cap) > ROW_CAPSULE_MAX;
     my $lead = defined $it->{rank} ? ($it->{year} // '') : _shortDate($it->{date});
-    my $meta = join(" \x{b7} ", grep { length } $lead, ($it->{genre} // ''));
+    my $meta = join(" \x{b7} ", grep { length } _scoreLabel($it), $lead, ($it->{genre} // ''));
     return join(' - ', grep { length } $meta, $cap);
 }
 

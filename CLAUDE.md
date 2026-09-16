@@ -60,6 +60,7 @@ because line numbers rot on the next edit.
 | `_searchSpotify`: no `hasCredentials` branch; account stays keyed per service | B | `_searchSpotify` HAS NO `hasCredentials` BRANCH` |
 | `pace_warm`: warm backs off only while Spotify refuses (429); always-on pacing REJECTED as too slow | B | `PACED_WARM_GAP` / `pace_warm`: THE WARM RUNS AT FULL WIDTH` |
 | `_refused` / `$holding` / `$gapTimer`: a synchronous Spotify refusal holds the warm; one re-armed wakeup — FIXED 0.9.39 (a fix record, not a suppression) | C | `SYNCHRONOUS SPOTIFY REFUSAL AND ONE` |
+| The review score sits on `line2` BY DESIGN and must not move to `line1`/`name` (the LL label door); a year row would show a score if one existed, and nothing writes one | — | `IT IS ON `line2`, AND IT MUST NEVER MOVE` |
 
 **Two standing rules that kill most repeat findings:**
 
@@ -531,6 +532,57 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 0.9.40 — the Pitchfork score on a review row (BUILT, NOT INSTALLED, NOT VERIFIED LIVE)
+**Asked for 2026-09-16 (Simon): "add the score to the display of each row … for the 3 review sections
+not the Year reviews as they have no score. Need to ensure this doesnt change any behaviour for LL and
+isnt searched at all its just for display purposes."** Format chosen from four offered: **out of ten,
+leading** — `8.4/10 · 3 September 2026 · Rock - <capsule>`.
+
+**IT IS ON `line2`, AND IT MUST NEVER MOVE TO `line1`/`name`.** That is the whole safety argument, and
+it is the Spotify case that forces it: a Spotify-matched row is `native_favurl`, so `_attachFavUrl` is
+skipped wholesale and the row carries NO `&al=` — ListenLater therefore stores the row LABEL as the
+album title (measured on plex:9000 at 0.9.39: `favorites_title "The Cure - Mixed Up"`, High Scoring
+Albums). Decorating the favurl to fix that is settled as WRONG (§A2 ``native_favurl`` SKIPPING). So
+`name`/`line1` are byte-for-byte unchanged in every section, matched and unmatched alike, and nothing
+on LL's add path reads `line2` (LL `Plugin.pm` `_finishAlbumAdd` prefers `&al=` then `$p{name}`; its
+only `line2` reads are on a SERVICE's own album node, in `Sources.pm`).
+
+**`defined $it->{score}` IS THE SECTION TEST — no section plumbing was added.** `_parseYear` hardcodes
+`score => undef` on every year entry ("year-end lists carry no score", API.pm) and the DB column is
+NULLABLE for exactly that reason, so the three review sections separate from the year lists by
+construction. `defined`, NOT truthiness: Pitchfork awards 0.0 (Jet, *Shine On*), and a truth test drops
+precisely the score most worth reading.
+
+**NO CACHE BUMP, AND THE FEATURE IS LIVE ON THE WARM STORE IMMEDIATELY.** `PARSE_VERSION` stays at 3
+and `STREAM_KEY_VERSION` stays at 27 — nothing about fetching, parsing or matching changed. `score`
+entered `DB.pm`'s `@COLS` in the SAME commit that set `PARSE_VERSION` to 3 (`e0984c2`, 0.9.26), so
+every list already stored carries it and no re-fetch is needed to see the number.
+
+**ON "isn't searched", stated precisely rather than claimed.** It stays out of the matcher (the
+resolver queries `$it->{artist}` / `$it->{album}`), out of the favurl, out of every cache key and out
+of the LL title. It is NOT invisible to Material's search-within-list, which scans title AND subtitle
+(`search-list.js` `searchListHasStr`) — no visible text can be. That line already carries the date, the
+genre and the capsule prose, so the score adds no searchable surface that was not already there.
+
+- **`_line2` has exactly two call sites**, both in `_reviewRow` (the matched-row relabel and the
+  unmatched-row return). It feeds no cache key, no favurl and no query.
+- **Tests: `tools/t_score.pl`** — 42 checks against the REAL subs. Formatting (one decimal kept, a
+  round 8 and a perfect 10 gaining theirs, a JSON string accepted), 0.0 as a real score, non-numeric /
+  empty / reference / missing input all refused, the scoreless CONTROL line proving the separator, the
+  year-row line unchanged, truncation with the score in front, and — the assertions that exist for LL —
+  `name` and `line1` IDENTICAL with and without a score on a matched (Spotify-shaped) row and an
+  unmatched one. **Anti-tested five ways, each biting:** `defined`→truthiness fails 2, `sprintf`
+  dropped fails 5, the numeric guard dropped fails 2, the score moved onto `line1` fails 9, the score
+  removed from `line2` fails 8. All 14 prior suites still green (1,194 + 42 = 1,236).
+- **STATED RESIDUAL, not a defect:** a year row that somehow CARRIED a score would render it. Nothing
+  upstream writes one, and `t_score.pl` pins that consequence explicitly rather than pretending the
+  guard covers it.
+- **BUILT AND PACKAGED at 0.9.40:** `install.xml`/`repo.xml` both 0.9.40; zip 26 entries, 546,450 bytes
+  uncompressed; `repo.xml <sha>` `b6f0363ae966741e5ea8bb22456a55b5f3ea04ab`. **NOT INSTALLED, NOT
+  VERIFIED LIVE** — what to look for once it is: a score on every row of Best New Music, High Scoring
+  Albums and Latest Reviews, none on Best Albums of the Year, and an LL add from a Spotify-matched PFR
+  row still storing a title with no `/10` in it. README / CHANGELOG owed at the merge to main, as always.
 
 ## Status: 0.9.39 — a synchronous Spotify refusal holds the warm; one paced wakeup (BUILT, REVIEW CLOSED + PUSHED, NOT INSTALLED)
 **Built and committed on `dev` 2026-09-16 (Simon: "version up PFR and zip then commit"), then REVIEWED 2026-09-16 (a32a86d + 90e3749, 1,647 lines): NO FINDINGS, round closed, PUSHED to `dev`.** The LBF 1.0.5 back-off fix, ported: see §C `SYNCHRONOUS SPOTIFY
