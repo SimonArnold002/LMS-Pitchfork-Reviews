@@ -61,6 +61,7 @@ because line numbers rot on the next edit.
 | `pace_warm`: warm backs off only while Spotify refuses (429); always-on pacing REJECTED as too slow | B | `PACED_WARM_GAP` / `pace_warm`: THE WARM RUNS AT FULL WIDTH` |
 | `_refused` / `$holding` / `$gapTimer`: a synchronous Spotify refusal holds the warm; one re-armed wakeup — FIXED 0.9.39 (a fix record, not a suppression) | C | `SYNCHRONOUS SPOTIFY REFUSAL AND ONE` |
 | The review score sits on `line2` BY DESIGN and must not move to `line1`/`name` (the LL label door); a year row would show a score if one existed, and nothing writes one | — | `IT IS ON `line2`, AND IT MUST NEVER MOVE` |
+| THE REVIEW-SCORE FEATURE (0.9.40–0.9.42) IS CLOSED — no follow-up work; bugs go through a normal review | — | `FEATURE CLOSED 2026-09-16 (Simon): "close this` |
 | `View: Score` needs no `_frozenOrder` (the score is fixed at parse, nothing warms it); PFR has no `index`/`quantity` mapping, so the rendered-rows drift class cannot arise; the `group_by` pref name is historical, kept to preserve stored choices | — | ``_frozenOrder` WAS CONSIDERED AND IS NOT NEEDED` |
 
 **Two standing rules that kill most repeat findings:**
@@ -438,9 +439,9 @@ transcript will be rediscovered as a finding within days.
 - **High Scoring Albums** — Pitchfork's curated high-scoring picks as a second browsable, playable list.
 - **Latest Reviews** — the most recent album reviews.
 - **Best Albums of the Year** — Pitchfork's annual top-50 countdown, ranked and playable. Opens on the newest published list and promotes each new one automatically when it lands each December; every year back to 2016 is a tap away, readable #1-first or as Pitchfork's own 50-to-1 countdown.
-- **Grouped your way** — all three lists group under **genre** (default) or **week** dividers, carrying the Pitchfork mark; tap **Grouped by** on the list itself to switch, and all three follow.
+- **Viewed your way** — all three lists group under **genre** (default) or **week** dividers, carrying the Pitchfork mark, or show as one flat list **by score**, highest first; tap **View:** on the list itself to switch, and all three follow.
 - **One-tap playback** — each review is matched to a directly-playable album on **Qobuz / Tidal / Deezer**, shown with the service's own artwork; play it or queue it without searching.
-- **Genres on every row** — each review shows its Pitchfork genre(s) on the row and the detail page.
+- **Scores and genres on every row** — each review shows its Pitchfork score (*Score 8.1/10*) and genre(s) on the row, and the genre on the detail page.
 - **Read the full review** — links out to Pitchfork; the plugin keeps only artist, album, date, genre and the short capsule (never reproduces the review).
 - **Grid or list** — every row carries artwork, so Material's thumbnail/grid toggle stays available.
 - **Choose your services** — set the Qobuz / Tidal / Deezer search order (or turn one off).
@@ -534,7 +535,14 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: 0.9.42 — a flat "View: Score" list, highest first (INSTALLED + VERIFIED LIVE 2026-09-16)
+## Status: 0.9.42 — a flat "View: Score" list, highest first (INSTALLED + VERIFIED LIVE, REVIEW CLOSED + PUSHED 2026-09-16)
+**REVIEWED 2026-09-16 on `dev` (`9b60d25` → `4e31b9f`, plus this ledger edit): NO FINDINGS, round closed, pushed to `origin/dev` at Simon's word.** Checked and held: `_groupedRows` dispatch is total with the same genre fallback as `_groupBy`; no reader of the retired `GROUPED_BY` token; the count appears once (header, not title); `_scoreOrdered` ties break newest-first on ISO text, unscored rows sink rather than drop, a real 0.0 stays above them, and the numeric guard is `_scoreLabel`'s. Suites `t_score` 61, `t_grouptoggle` 40, `t_sections` 46, `t_yearlist` 137, all green. Suppressed by the index, not cleared: line2 placement, no `_frozenOrder`, the `group_by` name.
+**FEATURE CLOSED 2026-09-16 (Simon): "close this feature request as done". The review-score work,
+0.9.40 → 0.9.42, is DONE** — the score on each row (0.9.40), the "Score" wording (0.9.41) and the flat
+`View: Score` list (0.9.42), all installed and verified. There is no open work on it. Anything wrong
+goes through a normal review and is fixed as it turns up; do not reopen it as a planned follow-up.
+Already known and not addressed: the four home shelves were not checked live for 0.9.42 (they never
+call `_groupedRows`), and a year row that somehow carried a score would render it (no upstream writer).
 **Asked for 2026-09-16 once the score was on the rows: "how feasible would it be to have one of our sort
 options be by score?" — then "it should be a flat list the sorts highest to lowest".** Planned first
 (`~/.claude/plans/hashed-bubbling-beaver.md`), three calls taken from Simon: the control reads
@@ -622,7 +630,7 @@ the Year view's `title => $label` rule.
   plugin init, so a raw `PLUGIN_PITCHFORKREVIEWS_VIEW_BY` on the row means `strings.txt` did not ship.
   README / CHANGELOG owed at the merge to main, as always.
 
-## Status: 0.9.41 — the score reads "Score 8.1/10" (REVIEW CLOSED, INSTALLED + TESTED, NOT PUSHED)
+## Status: 0.9.41 — the score reads "Score 8.1/10" (REVIEW CLOSED, INSTALLED + TESTED, PUSHED 2026-09-16 with 0.9.42)
 **REVIEWED 2026-09-16 on `dev`, 3 commits ahead of `origin/dev` (`9b60d25`, `d099c74`, `d191c4c`; tree clean, so the range IS the review): NO FINDINGS, round closed.** What was checked and held: `_line2` has exactly two call sites, both in `_reviewRow`, both already holding a `$client`, and the only other callers are `t_yearlist.pl`'s two, updated — a fleet-wide grep finds no other Perl caller. The `defined $it->{score}` guard survives the CACHE round trip, not just the live parse: `score` is in `DB.pm`'s `%NULLABLE` and bound raw rather than through the `// ''` default, so a genuine `0` comes back as `0` and a year row comes back NULL — the 0.0 case the feature exists for is not lost on the cached path. `name`/`line1` are byte-identical with and without a score on BOTH the matched and unmatched branches (the ListenLater door, still shut). `PLUGIN_PITCHFORKREVIEWS_SCORE` is present in the SHIPPED `strings.txt` inside the zip, so it will not render as a raw token after install. All 15 suites green, 1,239 checks. **Two things were suppressed by the gates rather than cleared:** the "a year row carrying a score would render it" residual (a stated residual with no upstream writer) and the extra subtitle width (a wording/placement call Simon made after seeing 0.9.40 live). **NOT PUSHED** — unpushed is the review gate, and a push to `dev` is the PASS signal, which is Simon's to give.
 **INSTALLED AND TESTED 2026-09-16 (Simon: "it was installed and tested all good")** — reported by Simon, not re-measured here. Superseded as the rig build by 0.9.42.
 
