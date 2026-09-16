@@ -532,8 +532,8 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: 0.9.39 — a synchronous Spotify refusal holds the warm; one paced wakeup (BUILT, NOT INSTALLED)
-**Built and committed on `dev` 2026-09-16 (Simon: "version up PFR and zip then commit"), not pushed.** The LBF 1.0.5 back-off fix, ported: see §C `SYNCHRONOUS SPOTIFY
+## Status: 0.9.39 — a synchronous Spotify refusal holds the warm; one paced wakeup (BUILT, REVIEW CLOSED + PUSHED, NOT INSTALLED)
+**Built and committed on `dev` 2026-09-16 (Simon: "version up PFR and zip then commit"), then REVIEWED 2026-09-16 (a32a86d + 90e3749, 1,647 lines): NO FINDINGS, round closed, PUSHED to `dev`.** The LBF 1.0.5 back-off fix, ported: see §C `SYNCHRONOUS SPOTIFY
 REFUSAL AND ONE`. It touches `Browse.pm` (`_svcCantAnswer`, `_searchSpotify`, `_findPlayable`,
 `_serveWaiters`, `_findPlayableSubtitle`, `_findPlayableReview`, `_resolveSection`) and
 `tools/t_spotify.pl` (§9b) only. **Verified before the real file was touched:** the patch was applied
