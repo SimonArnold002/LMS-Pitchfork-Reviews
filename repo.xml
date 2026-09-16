@@ -3,7 +3,7 @@
     <title lang="EN">Pitchfork Reviews</title>
   </details>
   <plugins>
-    <plugin name="PitchforkReviews" version="0.9.40" minTarget="9.0.0" maxTarget="*">
+    <plugin name="PitchforkReviews" version="0.9.41" minTarget="9.0.0" maxTarget="*">
       <title lang="EN">Pitchfork Reviews</title>
       <desc lang="EN">Browse Pitchfork album reviews in Lyrion Music Server and play the album from your streaming library</desc>
       <category>musicservices</category>
@@ -14,7 +14,7 @@
       <!-- On EVERY zip rebuild: bump the version (install.xml + here) AND recompute
            this sha (shasum -a 1 PitchforkReviews.zip) — a same-version/stale-sha zip
            won't reinstall. -->
-      <sha>b6f0363ae966741e5ea8bb22456a55b5f3ea04ab</sha>
+      <sha>249194eee38d127cd67b815fd94d91169973fc2b</sha>
     </plugin>
   </plugins>
 </extensions>

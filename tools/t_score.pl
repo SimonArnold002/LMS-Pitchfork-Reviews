@@ -16,12 +16,16 @@
 #      the favurl, or anything the resolver queries on.
 #   4. 0.0 IS A REAL SCORE. Pitchfork awards it (Jet, *Shine On*). A truthiness test drops
 #      exactly the score most worth reading, and reads identically to "no score at all".
+#   5. THE WORD IS TRANSLATED (0.9.41, "Score 8.1/10" asked for over the bare number). The
+#      harness's `cstring` stub returns the TOKEN, so $S below is what a correct build emits
+#      and a hardcoded English "Score" would fail every expectation here.
 #
 # ANTI-TESTED (each rerun with the guard removed, to prove the test can fail):
 #   `defined` -> truthiness            => the 0.0 checks fail
 #   sprintf   -> the raw value         => the round-score checks fail
 #   the numeric pattern guard dropped  => the junk-input checks fail
 #   the score moved onto line1         => the ListenLater label checks fail
+#   cstring -> a hardcoded 'Score'     => every formatting check fails
 #
 # Run from the repo root:  perl tools/t_score.pl
 use strict; use warnings; use utf8;
@@ -131,73 +135,90 @@ sub yearrow {
              date => '2025-12-02T14:00:00.000Z', %o };
 }
 
+# The harness's Slim::Utils::Strings stub returns the TOKEN, not the English word, so every
+# expectation below is spelled with it — which is exactly what makes "someone hardcoded the
+# word" a failing build rather than an invisible one.
+my $S = 'PLUGIN_PITCHFORKREVIEWS_SCORE';
+
 my $SCORE = $BR_NS->can('_scoreLabel') or die "no _scoreLabel — the feature is not there";
 my $LINE2 = $BR_NS->can('_line2');
 my $ROW   = $BR_NS->can('_reviewRow');
 
 print "--- _scoreLabel: the number itself ---\n";
 {
-    is('one decimal is kept as printed',    $SCORE->({ score => 8.4 }),   '8.4/10');
-    is('a round score gains its decimal',   $SCORE->({ score => 8 }),     '8.0/10');
-    is('...a perfect 10 too',               $SCORE->({ score => 10 }),    '10.0/10');
-    is('...and 10.0 stays 10.0',            $SCORE->({ score => 10.0 }),  '10.0/10');
-    is('a string from JSON is accepted',    $SCORE->({ score => '7.5' }), '7.5/10');
+    is('one decimal is kept as printed',    $SCORE->(undef, { score => 8.4 }),   "$S 8.4/10");
+    is('a round score gains its decimal',   $SCORE->(undef, { score => 8 }),     "$S 8.0/10");
+    is('...a perfect 10 too',               $SCORE->(undef, { score => 10 }),    "$S 10.0/10");
+    is('...and 10.0 stays 10.0',            $SCORE->(undef, { score => 10.0 }),  "$S 10.0/10");
+    is('a string from JSON is accepted',    $SCORE->(undef, { score => '7.5' }), "$S 7.5/10");
 
     # THE 0.0 CASE, which is why the guard is `defined`. Jet's *Shine On* really scored it.
-    is('0.0 is a SCORE, not an absence',    $SCORE->({ score => 0 }),     '0.0/10');
-    is('...and 0.0 spelled out likewise',   $SCORE->({ score => '0.0' }), '0.0/10');
+    is('0.0 is a SCORE, not an absence',    $SCORE->(undef, { score => 0 }),     "$S 0.0/10");
+    is('...and 0.0 spelled out likewise',   $SCORE->(undef, { score => '0.0' }), "$S 0.0/10");
 
-    is('no score at all renders nothing',   $SCORE->({}),                 '');
-    is('an explicit undef likewise',        $SCORE->({ score => undef }), '');
+    is('no score at all renders nothing',   $SCORE->(undef, {}),                 '');
+    is('an explicit undef likewise',        $SCORE->(undef, { score => undef }), '');
 
     # The pattern guard. `ratingValue.score` is whatever the page state holds; without this
     # a surprise string would go through sprintf and print as a score nobody awarded.
-    is('a non-numeric string is refused',   $SCORE->({ score => 'N/A' }), '');
-    is('...an empty string too',            $SCORE->({ score => '' }),    '');
-    is('...and a reference is refused',     $SCORE->({ score => {} }),    '');
-    is('a missing item is survivable',      $SCORE->(undef),              '');
+    is('a non-numeric string is refused',   $SCORE->(undef, { score => 'N/A' }), '');
+    is('...an empty string too',            $SCORE->(undef, { score => '' }),    '');
+    is('...and a reference is refused',     $SCORE->(undef, { score => {} }),    '');
+    is('a missing item is survivable',      $SCORE->(undef, undef),              '');
+}
+
+print "--- the string token is really shipped ---\n";
+{
+    # A cstring for a token that is not in strings.txt does not fail — LMS renders the RAW
+    # TOKEN to the user. So "the word is translated" is only true if the file says so, and
+    # asserting it here is what stops a rename from shipping "PLUGIN_PITCHFORKREVIEWS_SCORE
+    # 8.4/10" onto 88 live rows.
+    my $st = do { local (@ARGV, $/) = ('PitchforkReviews/strings.txt'); <> } // '';
+    ok("strings.txt declares $S",        $st =~ /^\Q$S\E$/m);
+    ok('...with an EN translation',      $st =~ /^\Q$S\E\n\tEN\t\S/m);
+    ok('...and an NL one, like its siblings', $st =~ /^\Q$S\E\n\tEN\t[^\n]*\n\tNL\t\S/m);
 }
 
 print "--- line2: the score leads, the rest of the line is unchanged ---\n";
 {
     is('score, then date, then genre, then capsule',
-       $LINE2->(review(score => 8.4)),
-       "8.4/10 \x{b7} 2 December 2025 \x{b7} Pop - Short capsule.");
+       $LINE2->(undef, review(score => 8.4)),
+       "$S 8.4/10 \x{b7} 2 December 2025 \x{b7} Pop - Short capsule.");
 
     # The control: the SAME item with the score taken away must give the line the plugin
     # drew before this feature existed. Without this, a broken separator passes unnoticed.
     is('a scoreless review row is exactly what it always was',
-       $LINE2->(review()),
+       $LINE2->(undef, review()),
        "2 December 2025 \x{b7} Pop - Short capsule.");
 
     is('0.0 shows on the line like any other score',
-       $LINE2->(review(score => 0)),
-       "0.0/10 \x{b7} 2 December 2025 \x{b7} Pop - Short capsule.");
+       $LINE2->(undef, review(score => 0)),
+       "$S 0.0/10 \x{b7} 2 December 2025 \x{b7} Pop - Short capsule.");
 
     is('a review with no genre still reads cleanly',
-       $LINE2->(review(score => 6.1, genre => '')),
-       "6.1/10 \x{b7} 2 December 2025 - Short capsule.");
+       $LINE2->(undef, review(score => 6.1, genre => '')),
+       "$S 6.1/10 \x{b7} 2 December 2025 - Short capsule.");
 
     is('a review with no capsule keeps the meta alone',
-       $LINE2->(review(score => 6.1, capsule => '')),
-       "6.1/10 \x{b7} 2 December 2025 \x{b7} Pop");
+       $LINE2->(undef, review(score => 6.1, capsule => '')),
+       "$S 6.1/10 \x{b7} 2 December 2025 \x{b7} Pop");
 
     # THE SECTION TEST, asserted as an ANSWER rather than as a branch: the year row is
     # built the way `_parseYear` builds it, and its line is identical to the one the
     # existing year suite already pins.
     is('a YEAR row is untouched — it leads with the year, with no score',
-       $LINE2->(yearrow()), '2025 - Short capsule.');
+       $LINE2->(undef, yearrow()), '2025 - Short capsule.');
 
     # ...and it stays untouched even if a score somehow reaches it, because the year row's
     # line is what the year sections are asked to show. This is the one case the `defined`
     # guard alone does NOT cover, so it is stated as a known consequence, not a claim:
     ok('a year row carrying a score WOULD show it — no upstream writes one (API.pm hardcodes undef)',
-       $LINE2->(yearrow(score => 9.9)) eq "9.9/10 \x{b7} 2025 - Short capsule.");
+       $LINE2->(undef, yearrow(score => 9.9)) eq "$S 9.9/10 \x{b7} 2025 - Short capsule.");
 
     my $long = 'x' x 400;
-    my $l2   = $LINE2->(review(score => 8.4, capsule => $long));
+    my $l2   = $LINE2->(undef, review(score => 8.4, capsule => $long));
     ok('the capsule is still truncated with the score in front', $l2 =~ /\.\.\.$/);
-    ok('...and the score survives the truncation', $l2 =~ /^8\.4\/10 \x{b7} /);
+    ok('...and the score survives the truncation', $l2 =~ /^\Q$S\E 8\.4\/10 \x{b7} /);
 }
 
 print "--- the ListenLater contract: line1/name never carry the score ---\n";
@@ -209,7 +230,7 @@ print "--- the ListenLater contract: line1/name never carry the score ---\n";
     is('...line1 likewise',                       $with->{line1}, 'Dijon - Baby');
     is('name is IDENTICAL with and without a score',  $with->{name},  $without->{name});
     is('...and so is line1',                          $with->{line1}, $without->{line1});
-    ok('the score IS on line2', ($with->{line2} // '') =~ /^8\.4\/10 \x{b7} /);
+    ok('the score IS on line2', ($with->{line2} // '') =~ /^\Q$S\E 8\.4\/10 \x{b7} /);
     ok('...and absent from line2 when there is none', ($without->{line2} // '') !~ m{/10});
 
     # MATCHED rows: _reviewRow copies the service album node and relabels it. This is the
@@ -223,7 +244,7 @@ print "--- the ListenLater contract: line1/name never carry the score ---\n";
     is('...line1 likewise',                                   $m->{line1}, 'Dijon - Baby');
     is('a matched label is IDENTICAL with and without a score', $m->{name},  $mn->{name});
     is('...and so is line1',                                    $m->{line1}, $mn->{line1});
-    ok('the matched row shows the score on line2', ($m->{line2} // '') =~ /^8\.4\/10 \x{b7} /);
+    ok('the matched row shows the score on line2', ($m->{line2} // '') =~ /^\Q$S\E 8\.4\/10 \x{b7} /);
     is('the play url is untouched', $m->{url}, 'spotify:album:5g9');
 
     # A RANKED row, the same two ways: the rank prefix is the only label decoration there is.

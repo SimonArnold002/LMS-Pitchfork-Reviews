@@ -533,6 +533,37 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
+## Status: 0.9.41 — the score reads "Score 8.1/10" (BUILT, NOT INSTALLED)
+**Simon, 2026-09-16, after seeing 0.9.40 live: "can we prepend the score with Score so it shows Score
+8.1/10".** A wording call on a rendered surface — made, not re-argued.
+
+**THE WORD IS TRANSLATED, NOT A LITERAL, and that is why the signatures changed.** The plugin ships EN
+AND NL (`strings.txt`), and `_line2`'s only other worded part goes through `cstring`, so the new
+`PLUGIN_PITCHFORKREVIEWS_SCORE` does too. `_scoreLabel` and `_line2` therefore take `$client` —
+both `_reviewRow` call sites already had one to pass, so nothing new had to be threaded through the
+feed. `t_yearlist.pl`'s two direct `_line2` calls were updated with them.
+
+**A cstring for a MISSING token does not fail — LMS renders the RAW TOKEN to the user.** So
+`t_score.pl` now reads `strings.txt` itself and asserts the token is declared with both an EN and an
+NL translation. Without that, a rename would have shipped `PLUGIN_PITCHFORKREVIEWS_SCORE 8.4/10`
+onto 88 live rows with every other test still green.
+
+- **Everything 0.9.40 settled still holds and is still pinned:** the score is on `line2` only,
+  `name`/`line1` are untouched (the ListenLater label door — see `## Status: 0.9.40`), `defined
+  $it->{score}` is still the section test, and there is still no cache bump (`PARSE_VERSION` 3,
+  `STREAM_KEY_VERSION` 27).
+- **Tests: `tools/t_score.pl` now 45 checks** (the three strings.txt assertions added). Every
+  expectation is spelled with the TOKEN, because the harness's `cstring` stub returns it — which is
+  what makes a hardcoded English word a failing build rather than an invisible one. **Anti-tested
+  seven ways, each biting:** `defined`→truthiness 2, `sprintf` dropped 5, the numeric guard dropped 2,
+  the score moved onto `line1` 9, the score removed from `line2` 8, **`cstring`→a hardcoded 'Score' 15,
+  and the token renamed without updating `strings.txt` 15.** All 14 prior suites green (1,239 total).
+- **BUILT AND PACKAGED at 0.9.41:** `install.xml`/`repo.xml` both 0.9.41; `repo.xml <sha>`
+  `249194eee38d127cd67b815fd94d91169973fc2b`; unzipped archive `diff -r` identical to the tree; the
+  token confirmed present in the SHIPPED `strings.txt`. **NOT INSTALLED** — strings are read at plugin
+  init, so the reinstall/restart is what makes the word appear; if a row ever shows the bare token,
+  `strings.txt` did not ship. README / CHANGELOG owed at the merge to main, as always.
+
 ## Status: 0.9.40 — the Pitchfork score on a review row (INSTALLED + VERIFIED LIVE 2026-09-16)
 **Asked for 2026-09-16 (Simon): "add the score to the display of each row … for the 3 review sections
 not the Year reviews as they have no score. Need to ensure this doesnt change any behaviour for LL and

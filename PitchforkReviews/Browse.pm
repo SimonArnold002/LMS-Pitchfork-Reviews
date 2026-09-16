@@ -1676,7 +1676,7 @@ sub _reviewRow {
         # so relabel ALL of them to the review's "Artist - Album" + capsule.
         $row{name}  = $line1;
         $row{line1} = $line1;
-        $row{line2} = _line2($it);
+        $row{line2} = _line2($client, $it);
         # Prefer the album cover, then the Pitchfork cover, then the service logo —
         # so a match with no album art still shows real artwork, not just the logo.
         # _fitCover caps an oversized service cover (see MAX_COVER_PX); it is applied
@@ -1694,7 +1694,7 @@ sub _reviewRow {
     return {
         name        => $line1,
         line1       => $line1,
-        line2       => _line2($it),
+        line2       => _line2($client, $it),
         image       => (_fitCover($it->{cover}) || DIVIDER_ICON),   # always set (keeps Material's grid view enabled)
         type        => 'link',
         url         => \&reviewDetail,
@@ -1831,14 +1831,19 @@ sub _attachReviewLink {
 # The pattern guard is what keeps a non-numeric out of sprintf: `ratingValue.score` is
 # whatever the page's state happens to hold, and an unexpected string would otherwise
 # render as "0.0/10" — a real score that was never awarded.
+#
+# THE WORD IS TRANSLATED, NOT A LITERAL (0.9.41). "Score 8.1/10" was asked for over the bare
+# number; the plugin ships EN and NL, and `_line2`'s other worded part (the detail page's
+# "Genre: …") goes through `cstring`, so this does too. That is the whole reason `_line2` and
+# this sub take `$client` — both `_reviewRow` call sites already had one to pass.
 sub _scoreLabel {
-    my ($it) = @_;
+    my ($client, $it) = @_;
     my $s = ($it || {})->{score};
     return '' unless defined $s && !ref $s && $s =~ /^\d+(?:\.\d+)?$/;
-    return sprintf('%.1f/10', $s);
+    return cstring($client, 'PLUGIN_PITCHFORKREVIEWS_SCORE') . sprintf(' %.1f/10', $s);
 }
 
-# Second line: "score · date · genre - truncated capsule" (each part dropped if absent).
+# Second line: "Score 8.4/10 · date · genre - truncated capsule" (each part dropped if absent).
 # On a year-end row the leading meta is the YEAR instead of the date: every entry
 # in a list shares one publication date, so repeating it down all 50 rows says
 # nothing, while the year is what the row is actually about.
@@ -1858,11 +1863,11 @@ sub _scoreLabel {
 # subtitle), but that line already carries the date, the genre and the capsule prose, so the
 # score adds no surface that was not already there.
 sub _line2 {
-    my ($it) = @_;
+    my ($client, $it) = @_;
     my $cap = $it->{capsule} // '';
     $cap = substr($cap, 0, ROW_CAPSULE_MAX) . '...' if length($cap) > ROW_CAPSULE_MAX;
     my $lead = defined $it->{rank} ? ($it->{year} // '') : _shortDate($it->{date});
-    my $meta = join(" \x{b7} ", grep { length } _scoreLabel($it), $lead, ($it->{genre} // ''));
+    my $meta = join(" \x{b7} ", grep { length } _scoreLabel($client, $it), $lead, ($it->{genre} // ''));
     return join(' - ', grep { length } $meta, $cap);
 }
 
