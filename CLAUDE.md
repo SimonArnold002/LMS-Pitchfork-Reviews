@@ -533,7 +533,7 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: 0.9.40 — the Pitchfork score on a review row (BUILT, NOT INSTALLED, NOT VERIFIED LIVE)
+## Status: 0.9.40 — the Pitchfork score on a review row (INSTALLED + VERIFIED LIVE 2026-09-16)
 **Asked for 2026-09-16 (Simon): "add the score to the display of each row … for the 3 review sections
 not the Year reviews as they have no score. Need to ensure this doesnt change any behaviour for LL and
 isnt searched at all its just for display purposes."** Format chosen from four offered: **out of ten,
@@ -579,10 +579,28 @@ genre and the capsule prose, so the score adds no searchable surface that was no
   upstream writes one, and `t_score.pl` pins that consequence explicitly rather than pretending the
   guard covers it.
 - **BUILT AND PACKAGED at 0.9.40:** `install.xml`/`repo.xml` both 0.9.40; zip 26 entries, 546,450 bytes
-  uncompressed; `repo.xml <sha>` `b6f0363ae966741e5ea8bb22456a55b5f3ea04ab`. **NOT INSTALLED, NOT
-  VERIFIED LIVE** — what to look for once it is: a score on every row of Best New Music, High Scoring
-  Albums and Latest Reviews, none on Best Albums of the Year, and an LL add from a Spotify-matched PFR
-  row still storing a title with no `/10` in it. README / CHANGELOG owed at the merge to main, as always.
+  uncompressed; `repo.xml <sha>` `b6f0363ae966741e5ea8bb22456a55b5f3ea04ab`; unzipped archive `diff -r`
+  identical to the tree. README / CHANGELOG owed at the merge to main, as always.
+- **INSTALLED AND VERIFIED LIVE 2026-09-16 on plex:9000, mechanically over jsonrpc — every claim above
+  measured, not inspected:**
+  - **88 of 88 review rows carry a score** across the three sections (Best New Music 29, High Scoring
+    Albums 29, Latest Reviews 30), every one matching `^\d+\.\d/10 · `. Observed range 2.0/10 (Bloc
+    Party, *Anatomy of a Brief Romance*) to 8.6/10 — so the low end renders, which is what the
+    `defined` guard exists for.
+  - **0 of 50 year rows carry one.** Best Albums of the Year still leads its label with the rank and
+    its line2 with the year (`1. Jazmine Sullivan - Heaux Tales` / `2021 - On her previous album…`).
+    The section test holds on live data with no section plumbing.
+  - **THE LL DOOR IS SHUT, measured on the row that proves it.** 82 matched rows: 80 Qobuz, 1 Tidal,
+    1 Spotify. The Spotify row is the one with NO `&al=` — the row whose LABEL LL stores — and its
+    `favorites_title` reads `Zel - Still Right Here`. **Zero `/10` in any row label, any
+    `favorites_title` or any favurl, on any of the 82.** Qobuz/Tidal `&al=` still clean
+    (`ULTIMATE%20LOVE%20FOREVER`).
+  - **No re-fetch and no re-resolve were needed** — the scores were there on the first open against the
+    warm store, as the no-cache-bump reasoning predicted.
+- **STILL UNPROVEN, and 0.9.40 does not change it: 0.9.39's Spotify refusal path.** Its code is now ON
+  the rig, but only 1 of 82 rows resolved to Spotify and the log carries no `error429` and no
+  `resolve Spotify: empty answer while Spotify is rate-limiting` line, so the paced back-off has still
+  never fired in the field. Do not record it as verified.
 
 ## Status: 0.9.39 — a synchronous Spotify refusal holds the warm; one paced wakeup (BUILT, REVIEW CLOSED + PUSHED, NOT INSTALLED)
 **Built and committed on `dev` 2026-09-16 (Simon: "version up PFR and zip then commit"), then REVIEWED 2026-09-16 (a32a86d + 90e3749, 1,647 lines): NO FINDINGS, round closed, PUSHED to `dev`.** The LBF 1.0.5 back-off fix, ported: see §C `SYNCHRONOUS SPOTIFY
