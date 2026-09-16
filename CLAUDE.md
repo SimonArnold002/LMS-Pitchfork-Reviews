@@ -61,6 +61,7 @@ because line numbers rot on the next edit.
 | `pace_warm`: warm backs off only while Spotify refuses (429); always-on pacing REJECTED as too slow | B | `PACED_WARM_GAP` / `pace_warm`: THE WARM RUNS AT FULL WIDTH` |
 | `_refused` / `$holding` / `$gapTimer`: a synchronous Spotify refusal holds the warm; one re-armed wakeup — FIXED 0.9.39 (a fix record, not a suppression) | C | `SYNCHRONOUS SPOTIFY REFUSAL AND ONE` |
 | The review score sits on `line2` BY DESIGN and must not move to `line1`/`name` (the LL label door); a year row would show a score if one existed, and nothing writes one | — | `IT IS ON `line2`, AND IT MUST NEVER MOVE` |
+| `View: Score` needs no `_frozenOrder` (the score is fixed at parse, nothing warms it); PFR has no `index`/`quantity` mapping, so the rendered-rows drift class cannot arise; the `group_by` pref name is historical, kept to preserve stored choices | — | ``_frozenOrder` WAS CONSIDERED AND IS NOT NEEDED` |
 
 **Two standing rules that kill most repeat findings:**
 
@@ -533,7 +534,98 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: 0.9.41 — the score reads "Score 8.1/10" (BUILT, NOT INSTALLED)
+## Status: 0.9.42 — a flat "View: Score" list, highest first (INSTALLED + VERIFIED LIVE 2026-09-16)
+**Asked for 2026-09-16 once the score was on the rows: "how feasible would it be to have one of our sort
+options be by score?" — then "it should be a flat list the sorts highest to lowest".** Planned first
+(`~/.claude/plans/hashed-bubbling-beaver.md`), three calls taken from Simon: the control reads
+**`View: Genre` → `View: Week` → `View: Score`**; the flat list gets a **bold header with the live
+count**, the Year view's shape; the **home shelves stay newest-first**.
+
+**A THIRD MODE ON THE EXISTING CONTROL, NOT A SECOND CONTROL.** `@GROUP_MODES` is now
+`('genre', 'date', 'score')`, still stored in `group_by` — the name is historical now that one mode is
+a sort, kept because renaming would orphan every stored choice (commented in `Plugin.pm`). The row verb
+became "View:" because no single accurate verb covered two groupings and a sort ("Grouped by Score"
+would describe a list with no groups). `PLUGIN_PITCHFORKREVIEWS_GROUPED_BY` is RETIRED, replaced by
+`PLUGIN_PITCHFORKREVIEWS_VIEW_BY`; `PLUGIN_PITCHFORKREVIEWS_VIEW_SCORE` is new. Both EN + NL. A
+dedicated `VIEW_SCORE` rather than reusing 0.9.41's `SCORE` row prefix, so rewording one cannot
+silently reword the other.
+
+**THE ORDERING IS LBF's `_sortWithin` SHAPE, DELIBERATELY — `_scoreOrdered`.** A Schwartzian transform
+with an EXPLICIT second key: score descending, then date newest-first. Two reasons, both measured:
+- **Perl's sort is not guaranteed stable**, and this list is addressed by POSITION (XMLBrowser's
+  `item_id`, re-resolved against a rebuilt feed; no session cache on a coderef top level). An order
+  that differed between walks would open the wrong row, so the tie-break is stated, never inherited.
+- **Ties are the common case, not an edge.** Live 2026-09-16: Best New Music 29 rows across SIX scores
+  (largest cluster 8), High Scoring Albums 29 across nine (largest cluster **14**), Latest Reviews 30
+  across 19. On two of three sections the SECOND key does most of the ordering.
+
+**A row with no usable score sorts LAST and is never dropped.** `-1` is the floor, because a bare
+`undef` numifies to 0 and would file an unscored row level with a real 0.0. Dropping was never an
+option — changing membership between renders is the other half of the positional-crumb problem. The
+numeric guard is `_scoreLabel`'s, so a value that will not render as a score is not sorted as one.
+
+**`_frozenOrder` WAS CONSIDERED AND IS NOT NEEDED.** LBF carries it for a set whose membership or keys
+move under a background warm (its genre filter). Here the score is on the parsed item, complete before
+any resolve, and `hide_unmatched` has been gone since 0.6.1 — the order is fixed from parse time.
+**Also audited while planning: PFR has NO `$args->{index}` / `$args->{quantity}` mapping anywhere** —
+it builds the whole list and lets XMLBrowser window it — so the LBF 0.9.207 rendered-rows drift class
+cannot arise in this plugin.
+
+**`_groupedRows` IS NOW TOTAL OVER `@GROUP_MODES`, and that was a live hole, not tidiness.** It read
+"genre, else weekly", and its no-mode fallback calls `_groupBy()` — which can now return `'score'`. An
+unhandled score would have rendered WEEKS under a control reading "Score": a silent wrong layout. It is
+now a ladder ending on a named mode, and an unrecognised value lands on `genre`, the same value
+`_groupBy` itself falls back to. `_groupLabel` follows the same rule.
+
+**`_scoreRows` reuses the Year view's assembly** (`_sectionHeader` + `_matchProgress`) rather than
+inventing a second flat layout. **The match count must appear exactly once**, so `fetchFeed` now
+branches on the mode: the grouping modes keep folding progress into the PAGE TITLE (they have no header
+to hang it on), and score mode passes a plain `title` because its header already carries the count —
+the Year view's `title => $label` rule.
+
+- **Untouched:** the home shelves (they never went through the grouper), Best Albums of the Year (never
+  goes through it, and carries no scores), `name`/`line1` (the ListenLater door from 0.9.40 stays shut),
+  the matcher, and every cache — no `PARSE_VERSION` bump, no `STREAM_KEY_VERSION` bump, no migration.
+- **Tests — 1,268 checks, all 15 suites green (was 1,239).** `t_score.pl` 61: strict descent, ties by
+  date against a fixture whose input order is neither date order nor its reverse (the fixture IS the
+  test — a stability-reliant sort passes a same-order one), score outranks date, 0.0 above a scoreless
+  row, count in == count out, junk floored BELOW a real 0.0, determinism across two passes, and the flat
+  render (one header, no dividers, branded icon). `t_grouptoggle.pl` 40: the full ring
+  genre→date→score→genre (a two-mode cycle could never have caught a reversed or skipping wrap), the
+  labels, the dispatch's totality, an unknown mode rendering as genre, the row text being a TOKEN, and
+  both new tokens present in `strings.txt` with EN and NL while the retired one is gone.
+  `t_sections.pl` updated for the new wording.
+- **Anti-tested seven ways, each biting:** tie-break dropped (score 2), sort reversed to ascending
+  (score 6), the `-1` floor removed (score 2), the score branch dropped from the dispatch (toggle 2),
+  `VIEW_BY` hardcoded instead of `cstring` (toggle 1), the numeric guard dropped from the sort (score 1),
+  the flat header removed (score 5 + toggle 3). **Two of those survived the first draft of the suite** —
+  the hardcoded format string, and the dropped numeric guard, whose three-row junk fixture returned the
+  right order for the wrong reason ('N/A' numifies to 0, still above an undef at -1). A real 0.0 row,
+  dated older than the junk row, is what makes the guard observable.
+- **BUILT AND PACKAGED at 0.9.42:** `install.xml`/`repo.xml` both 0.9.42 (bumped at Simon's yes — 0.9.41
+  was installed); zip 26 entries, 552,741 bytes uncompressed; `repo.xml <sha>`
+  `c51c0c349f34348a4a313b6cf60cb56ee691781d`; unzipped archive `diff -r` identical to the tree; both new
+  tokens present and the retired one absent in the SHIPPED `strings.txt`.
+- **INSTALLED 2026-09-16 — Simon: "works well" — and then VERIFIED LIVE over jsonrpc, 26 checks, 0
+  failures** (`group_by` flipped to `score` for the run and restored to `genre` afterwards). Per section:
+  Best New Music 29 rows, High Scoring Albums 29, Latest Reviews 30 — each the SAME count as genre view,
+  every row scored, scores never rising, exactly one header (`Best New Music (29)` etc.) and no dividers,
+  the toggle reading `View: Score (tap to change)`, tie clusters (largest 8 / 14 / 3) newest first, the
+  order IDENTICAL on a second request, and no `/10` in any title, favurl or `favorites_title`. The Year
+  view is still ranked 1..N with no scores. **Not checked live: the four home shelves** — they never
+  call `_groupedRows` (read in code), but no shelf request was made.
+- **The original pre-install checklist, kept for the record** — over jsonrpc: with `group_by` at
+  `score`, each of `item_id:0|1|2` monotonically non-increasing, no divider rows, exactly one header with
+  the section name and count, the same row count as genre mode; the 8- and 14-row tie clusters in date
+  order, newest first, and identical on a second request; genre and week unchanged; the Year view and all
+  four home shelves unchanged; still no `/10` in any label, favurl or `favorites_title`. Strings load at
+  plugin init, so a raw `PLUGIN_PITCHFORKREVIEWS_VIEW_BY` on the row means `strings.txt` did not ship.
+  README / CHANGELOG owed at the merge to main, as always.
+
+## Status: 0.9.41 — the score reads "Score 8.1/10" (REVIEW CLOSED, INSTALLED + TESTED, NOT PUSHED)
+**REVIEWED 2026-09-16 on `dev`, 3 commits ahead of `origin/dev` (`9b60d25`, `d099c74`, `d191c4c`; tree clean, so the range IS the review): NO FINDINGS, round closed.** What was checked and held: `_line2` has exactly two call sites, both in `_reviewRow`, both already holding a `$client`, and the only other callers are `t_yearlist.pl`'s two, updated — a fleet-wide grep finds no other Perl caller. The `defined $it->{score}` guard survives the CACHE round trip, not just the live parse: `score` is in `DB.pm`'s `%NULLABLE` and bound raw rather than through the `// ''` default, so a genuine `0` comes back as `0` and a year row comes back NULL — the 0.0 case the feature exists for is not lost on the cached path. `name`/`line1` are byte-identical with and without a score on BOTH the matched and unmatched branches (the ListenLater door, still shut). `PLUGIN_PITCHFORKREVIEWS_SCORE` is present in the SHIPPED `strings.txt` inside the zip, so it will not render as a raw token after install. All 15 suites green, 1,239 checks. **Two things were suppressed by the gates rather than cleared:** the "a year row carrying a score would render it" residual (a stated residual with no upstream writer) and the extra subtitle width (a wording/placement call Simon made after seeing 0.9.40 live). **NOT PUSHED** — unpushed is the review gate, and a push to `dev` is the PASS signal, which is Simon's to give.
+**INSTALLED AND TESTED 2026-09-16 (Simon: "it was installed and tested all good")** — reported by Simon, not re-measured here. Superseded as the rig build by 0.9.42.
+
 **Simon, 2026-09-16, after seeing 0.9.40 live: "can we prepend the score with Score so it shows Score
 8.1/10".** A wording call on a rendered surface — made, not re-argued.
 

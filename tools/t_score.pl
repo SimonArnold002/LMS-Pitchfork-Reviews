@@ -272,5 +272,80 @@ print "--- nothing the matcher reads is touched ---\n";
     ok('the label has no /10 anywhere', $row->{name} !~ m{/10});
 }
 
+print "--- _scoreOrdered: highest first, ties by date, nothing dropped ---\n";
+{
+    my $ORD = $BR_NS->can('_scoreOrdered') or die "no _scoreOrdered";
+
+    # Names carry their own score so a wrong order is readable in the failure line.
+    my $mk = sub { my ($n, $sc, $d) = @_;
+                   { artist => 'A', album => $n, capsule => '', genre => '',
+                     date => $d, (defined $sc ? (score => $sc) : ()) } };
+    my $names = sub { join(',', map { $_->{album} } @{ $_[0] }) };
+
+    my $mixed = [ $mk->('c7', 7.0, '2025-01-03'), $mk->('a9', 9.2, '2025-01-01'),
+                  $mk->('b8', 8.4, '2025-01-02') ];
+    is('strictly descending by score', $names->($ORD->($mixed)), 'a9,b8,c7');
+
+    # THE TIE FIXTURE, and the fixture IS the test. All three share one score, and the
+    # input order is neither date order nor its reverse — so an implementation that
+    # leant on Perl's sort being stable returns input order and fails here, while a
+    # same-order fixture would have let it pass. This is the case that matters live:
+    # measured 2026-09-16, High Scoring Albums had 29 rows across nine scores, the
+    # largest tie cluster being fourteen rows.
+    my $tied = [ $mk->('mid', 8.0, '2025-06-02'), $mk->('old', 8.0, '2025-06-01'),
+                 $mk->('new', 8.0, '2025-06-03') ];
+    is('ties break by date, newest first', $names->($ORD->($tied)), 'new,mid,old');
+
+    my $mix = [ $mk->('lo_new', 7.0, '2025-06-09'), $mk->('hi_old', 9.0, '2025-06-01'),
+                $mk->('hi_new', 9.0, '2025-06-08') ];
+    is('score outranks date', $names->($ORD->($mix)), 'hi_new,hi_old,lo_new');
+
+    # 0.0 IS A SCORE and must outrank a row that has none — the `-1` floor, not a bare
+    # undef, which numifies to 0 and would file the unscored row level with a real 0.0.
+    my $zero = [ $mk->('none', undef, '2025-06-09'), $mk->('zero', 0,  '2025-06-01'),
+                 $mk->('two',  2.0,   '2025-06-02') ];
+    is('0.0 sorts below 2.0 but above a scoreless row', $names->($ORD->($zero)), 'two,zero,none');
+
+    # NOTHING IS EVER DROPPED. Changing membership between renders is the other half of
+    # the positional-crumb problem, so an unusable score demotes a row, never removes it.
+    #
+    # THE 0.0 ROW IS LOAD-BEARING IN THIS FIXTURE, and dated OLDER than the junk row on
+    # purpose. Without it, dropping the numeric guard is invisible: 'N/A' numifies to 0,
+    # which still sits above an undef floored to -1, so a three-row junk/undef fixture
+    # returns the right answer for the wrong reason. With a real 0.0 below it, the guard
+    # is the only thing that keeps 'N/A' from outranking a score Pitchfork actually
+    # awarded — `bad` must sort BELOW `zero` despite being the newer of the two.
+    my $junk = [ $mk->('ok',   8.0,   '2025-06-04'), $mk->('bad',  'N/A', '2025-06-03'),
+                 $mk->('zero', 0,     '2025-06-02'), $mk->('none', undef, '2025-06-01') ];
+    my $out  = $ORD->($junk);
+    is('count in == count out', scalar(@$out), 4);
+    is('a junk score is floored like undef — below a real 0.0, not level with it',
+       $names->($out), 'ok,zero,bad,none');
+
+    # Determinism: the same input must give the same order every walk, because
+    # XMLBrowser re-resolves a tapped row by POSITION against a rebuilt feed.
+    is('a second pass over the same list is identical',
+       $names->($ORD->($tied)), $names->($ORD->($tied)));
+
+    is('an empty list is survivable', scalar @{ $ORD->([]) }, 0);
+    is('a non-arrayref is survivable', scalar @{ $ORD->(undef) }, 0);
+}
+
+print "--- _scoreRows: one header, no dividers ---\n";
+{
+    my $ROWS = $BR_NS->can('_scoreRows') or die "no _scoreRows";
+    my @items = ( { artist => 'A', album => 'hi', score => 9.0, capsule => '', genre => 'Rock', date => '2025-06-02' },
+                  { artist => 'B', album => 'lo', score => 3.0, capsule => '', genre => 'Pop',  date => '2025-06-01' } );
+
+    my $rows = $ROWS->(undef, \@items, 1, 'reviews');
+    is('header first, then every row', scalar(@$rows), 3);
+    ok('the header is not a review row', !exists $rows->[0]{line1});
+    ok('the header counts the rows', ($rows->[0]{name} // '') =~ /\(2\)$/);
+    is('highest score leads',  $rows->[1]{line1}, 'A - hi');
+    is('...lowest last',       $rows->[2]{line1}, 'B - lo');
+    ok('no genre divider is emitted', 0 == grep { ($_->{name} // '') eq 'Rock' } @$rows);
+    ok('the header keeps the branded icon', length($rows->[0]{image} // ''));
+}
+
 printf "\n%d passed, %d failed\n", $p, $f;
 exit($f ? 1 : 0);

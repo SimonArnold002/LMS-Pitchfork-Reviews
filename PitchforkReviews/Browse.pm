@@ -483,28 +483,40 @@ sub fetchFeed {
         _resolveSection($client, $items, sub {
             my $mode = _groupBy();
 
-            # Options section (Material header + its rows) on top, then the grouped
-            # content under its own genre/week dividers — the same shape as the year
-            # view and the sibling ListenBrainz plugin. The action rows used to sit
-            # bare above the first divider, which read as two unexplained rows
-            # before the list started.
+            # Options section (Material header + its rows) on top, then the content —
+            # under genre/week dividers, or as one flat score-ranked list — the same
+            # shape as the year view and the sibling ListenBrainz plugin. The action
+            # rows used to sit bare above the first divider, which read as two
+            # unexplained rows before the list started.
             my @opt  = ( _refreshRow($client, $source), _groupToggle($client, $mode) );
             my @rows = ( _sectionHeader($client, cstring($client, 'PLUGIN_PITCHFORKREVIEWS_SECTION_OPTIONS'), $headers, \@opt),
                          @opt );
 
             if (@$items) {
-                push @rows, @{ _groupedRows($client, $items, $headers, $mode) };
+                push @rows, @{ _groupedRows($client, $items, $headers, $mode, $source) };
             }
             else {
                 push @rows, { name => cstring($client, 'PLUGIN_PITCHFORKREVIEWS_EMPTY'), type => 'text' };
             }
 
-            # These lists group under genre/week dividers, so unlike the year view they
-            # carry no header with a count to fold the progress into. The PAGE TITLE
-            # takes it instead — also not a row, so the same "nothing is added or
-            # removed" rule holds. Emitted only while incomplete: a finished list keeps
-            # the title Material already derives from the tile that opened it, so
-            # nothing changes on the normal (warm) path.
+            # WHERE THE MATCH COUNT GOES DEPENDS ON THE MODE, because it must appear
+            # exactly ONCE. The two GROUPING modes have no header of their own to hang
+            # it on — their dividers name a genre or a week — so the PAGE TITLE takes
+            # it, which is also not a row and so keeps the "nothing is added or
+            # removed" rule. Emitted only while incomplete: a finished list keeps the
+            # title Material already derives from the tile that opened it, so nothing
+            # changes on the normal (warm) path.
+            #
+            # THE SCORE MODE HAS A HEADER (_scoreRows), and it already carries the
+            # count — so the title here must be the plain section name, or the page
+            # says "(12 of 30)" twice. Same reasoning as the year view, which names
+            # the list in its header and passes `title => $label` bare.
+            if ($mode eq 'score') {
+                $cb->({ items => \@rows, cachetime => 0,
+                        title => cstring($client, _sourceTitleToken($source)) });
+                return;
+            }
+
             my $progress = @$items ? _matchProgress($client, $items) : '';
             $cb->({ items => \@rows, cachetime => 0,
                     ($progress =~ /^ \(\d+\)$/ ? ()
@@ -2033,44 +2045,60 @@ sub _headerType {
     return $_headerTypeCache = $useBasic ? 'header-basic' : 'header';
 }
 
-# Dispatch a review list to a grouping mode: 'genre' (the default) groups under
-# each Pitchfork genre; 'date' keeps the weekly dividers. Either way the feed items
-# arrive newest-first (API sorts by date), so date order is preserved within every
-# bucket — and BOTH modes emit the same branded Material divider (_divHeader), so
-# switching mode changes what the headers say, never whether there are headers.
+# Dispatch a review list to a layout mode: 'genre' (the default) groups under each
+# Pitchfork genre; 'date' keeps the weekly dividers; 'score' abandons grouping
+# altogether for ONE FLAT LIST, highest score first. The two GROUPING modes leave the
+# feed's newest-first order intact within every bucket and emit the same branded
+# Material divider (_divHeader), so switching between them changes what the headers
+# say, never whether there are headers. 'score' emits no dividers at all — it renders
+# the year view's shape instead (one bold header with the count, then the rows).
 #
 # Flipped in place by _groupToggle on the view (0.8.2), the same mechanics as the
 # year-list sort. It was a Settings-page radio until then; the pref is unchanged,
 # so an existing choice carries over untouched.
-my @GROUP_MODES = ('genre', 'date');
+my @GROUP_MODES = ('genre', 'date', 'score');
 
 sub _groupBy {
     my $m = $prefs->get('group_by') || 'genre';
     return (grep { $_ eq $m } @GROUP_MODES) ? $m : 'genre';
 }
 
+# THE DISPATCH IS TOTAL OVER @GROUP_MODES, and that is the point of writing it as a
+# ladder ending in a NAMED mode rather than a bare fallback (0.9.42). It used to read
+# "genre, else weekly", which was fine while those were the only two — but $mode
+# defaults to _groupBy(), so the moment 'score' joined the pref's value set, an
+# unhandled mode would have rendered WEEKS under a control that said Score. A silent
+# wrong layout, not an error. Anything unrecognised still lands on 'genre', the same
+# value _groupBy itself falls back to, so the two agree.
 sub _groupedRows {
-    my ($client, $items, $headers, $mode) = @_;
+    my ($client, $items, $headers, $mode, $source) = @_;
     $mode ||= _groupBy();
-    return _genreRows($client, $items, $headers) if $mode eq 'genre';
-    return _weeklyRows($client, $items, $headers);
+    return _weeklyRows($client, $items, $headers)          if $mode eq 'date';
+    return _scoreRows($client, $items, $headers, $source)  if $mode eq 'score';
+    return _genreRows($client, $items, $headers);
 }
 
 sub _groupLabel {
     my ($client, $mode) = @_;
-    return cstring($client, ($mode // 'genre') eq 'date'
-        ? 'PLUGIN_PITCHFORKREVIEWS_GROUP_WEEK'
-        : 'PLUGIN_PITCHFORKREVIEWS_GROUP_BY_GENRE');
+    $mode //= 'genre';
+    return cstring($client, $mode eq 'date'  ? 'PLUGIN_PITCHFORKREVIEWS_GROUP_WEEK'
+                          : $mode eq 'score' ? 'PLUGIN_PITCHFORKREVIEWS_VIEW_SCORE'
+                          :                    'PLUGIN_PITCHFORKREVIEWS_GROUP_BY_GENRE');
 }
 
-# "Grouped by <mode> (tap to change)" — identical mechanics to _yearSortToggle:
-# durable pref, advanced from the LIVE pref (so a stale view can't set it
-# backwards), nextWindow => 'refresh' on an EMPTY response to re-walk in place.
-# Shared by all three review feeds, because the pref is shared.
+# "View: <mode> (tap to change)" — identical mechanics to _yearSortToggle: durable
+# pref, advanced from the LIVE pref (so a stale view can't set it backwards),
+# nextWindow => 'refresh' on an EMPTY response to re-walk in place. Shared by all
+# three review feeds, because the pref is shared.
+#
+# THE VERB IS "View", NOT "Grouped by" (0.9.42, Simon's call). Two of the three modes
+# GROUP and the third SORTS, so no single accurate verb existed: "Grouped by Score"
+# would have described a list with no groups in it. "View:" is honest about all three.
+# The old PLUGIN_PITCHFORKREVIEWS_GROUPED_BY token is retired with it.
 sub _groupToggle {
     my ($client, $mode) = @_;
     return {
-        name       => sprintf(cstring($client, 'PLUGIN_PITCHFORKREVIEWS_GROUPED_BY'),
+        name       => sprintf(cstring($client, 'PLUGIN_PITCHFORKREVIEWS_VIEW_BY'),
                               _groupLabel($client, $mode)),
         type       => 'link',
         image      => SORT_ICON,
@@ -2125,6 +2153,61 @@ sub _weeklyRows {
         push @rows, map { _reviewRow($client, $_, $headers) } @$wk;
     }
     return \@rows;
+}
+
+# ---------------------------------------------------------------------------
+# THE SCORE VIEW (0.9.42): one flat list, highest first, no dividers.
+#
+# WHY THE SHAPE IS A SCHWARTZIAN TRANSFORM WITH AN EXPLICIT SECOND KEY, copied from
+# the sibling plugin's `_sortWithin` (LBF Browse.pm) rather than reinvented:
+#
+#   1. PERL'S SORT IS NOT GUARANTEED STABLE. It is mergesort in practice, but the
+#      language only promises stability under `use sort 'stable'`, and this list is
+#      addressed by POSITION — XMLBrowser's item_id is a positional crumb re-resolved
+#      against a freshly rebuilt feed, and this plugin's coderef top level mints no
+#      session cache, so every click rebuilds the whole tree. An order that differed
+#      between two walks would open the WRONG ROW. The tie-break is therefore stated,
+#      not inherited.
+#   2. THE TIES ARE NOT AN EDGE CASE, THEY ARE THE COMMON CASE. Measured live
+#      2026-09-16: Best New Music had 29 rows across SIX distinct scores (largest tie
+#      cluster 8), High Scoring Albums 29 rows across nine (largest cluster 14).
+#      These are curated high-score lists, so on two of the three sections the
+#      SECOND key does most of the ordering. Date, newest first — the order the feed
+#      arrives in, so a tied run reads exactly as it does in the other two modes.
+#   3. The key is computed ONCE PER ROW. sort calls its comparator O(n log n) times.
+#
+# A ROW WITH NO USABLE SCORE SORTS TO THE BOTTOM AND IS NEVER DROPPED. `-1` is the
+# floor because a bare `undef` numifies to 0, which would file an unscored review
+# above a real 0.0 — and Pitchfork awards 0.0. Dropping such a row instead was never
+# an option: changing MEMBERSHIP between renders is the other half of the positional
+# crumb problem. The guard is `_scoreLabel`'s, so a value that will not render as a
+# score is also not sorted as one — one rule, not two that can disagree.
+sub _scoreOrdered {
+    my ($items) = @_;
+    return [] unless ref $items eq 'ARRAY';
+    return [ map  { $_->[2] }
+             sort { $b->[0] <=> $a->[0] || $b->[1] cmp $a->[1] }
+             map  { my $s = $_->{score};
+                    [ (defined $s && !ref $s && $s =~ /^\d+(?:\.\d+)?$/ ? $s + 0 : -1),
+                      ($_->{date} // ''), $_ ] } @$items ];
+}
+
+# The flat score list: ONE bold header carrying the section name and the live match
+# count, then every row. This is the year view's assembly (fetchYearFeed), reused
+# deliberately — it is the plugin's only other flat list, and a second layout for the
+# same job would drift from it. `$noIcon` is NOT set, so the header keeps the branded
+# thumbnail the genre/week dividers have.
+#
+# The count comes from _matchProgress, which is why the header exists at all: the two
+# grouping modes have no header to hang it on and fold it into the PAGE TITLE instead
+# (see fetchFeed). With a header here, the title must not also carry it.
+sub _scoreRows {
+    my ($client, $items, $headers, $source) = @_;
+    my $ordered = _scoreOrdered($items);
+    my @albums  = map { _reviewRow($client, $_, $headers) } @$ordered;
+    my $label   = cstring($client, _sourceTitleToken($source // 'reviews'))
+                . _matchProgress($client, $ordered);
+    return [ _sectionHeader($client, $label, $headers, \@albums), @albums ];
 }
 
 # Group items by their PRIMARY Pitchfork genre, emitting a genre divider + that
