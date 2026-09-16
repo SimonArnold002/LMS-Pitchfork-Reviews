@@ -108,6 +108,9 @@ $prefs->init({
     svc_priority_qobuz  => 1,
     svc_priority_tidal  => 2,
     svc_priority_deezer => 3,
+    # Spotify (via Spotty) last: it only competes once the others have missed, and its
+    # Pipeline cannot tell a failed search from an empty one.
+    svc_priority_spotify => 4,
 
     # Latest Reviews grouping: 'date' (weekly dividers) or 'genre'. Default 'genre'
     # for now so a fresh install shows the genre grouping without a settings visit.
