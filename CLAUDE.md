@@ -3869,6 +3869,8 @@ repo.xml         # <extensions> (plural — repo-install manifest)
 
 **ADDING A NEW SERVICE — READ `docs/streaming-adapter-spec.md` FIRST.** It is the adapter contract across the released plugins (LBF, PFR, LL), carried verbatim in each repo: what a service's own plugin must expose (R1-R8), the leg semantics (`undef` = inconclusive vs `[]` = a real miss, and the TTL each picks), the item fields to stamp, the acceptance tests, and — per plugin — every site that still forces an edit OUTSIDE the adapter table, with the registry field that closes it. **This repo's two: the `_rebuildStreamItems` chain (`Browse.pm:3696`), and the `_orderedAdapters` memo key (`Browse.pm:2174`), which is built from a fixed `qw(qobuz tidal deezer)` — build it from the table BEFORE adding a fourth service, or that service's priority changes will not invalidate the memo.** Edit the canonical copy in the ListenBrainz repo and re-copy, per the header.
 
+**SPEC RE-COPIED 2026-09-16 (sha1 `504f722a…`, identical in LBF, PFR and LL).** §6's rate-limit rules gained three points from LBF's third Spotify back-off review: tag the refusal on the answer itself; every loop that searches must check the back-off on its own (nothing inherits it); and a refusal can answer SYNCHRONOUSLY (Spotty's `getToken` returns `$cb->(-429)` in-stack), so a pump must not treat every in-loop completion as a cache hit. Its pointer to `docs/spotify-rate-limits.md` now says that file is in the LBF repo only. No code in this repo was changed by the re-copy.
+
 **Qobuz + Tidal + Deezer** (Bandcamp not ported — manual/loop-blocking). Priorities on
 the settings page (`svc_priority_qobuz|tidal|deezer`; 0 = never; lower = searched
 first). **The subtle bit — album nodes carry a CODEREF `url` that Storable can't
