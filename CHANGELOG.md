@@ -3,7 +3,7 @@
 All notable changes to **Pitchfork Reviews** are listed here.
 Versions follow `MAJOR.MINOR.PATCH`.
 
-## 0.9.42 — 2026-09-17
+## 1.0.0 — 2026-09-17
 
 Spotify joins as a fourth service, every review shows its Pitchfork score, and the review lists
 can be read highest score first.
