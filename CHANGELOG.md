@@ -3,6 +3,33 @@
 All notable changes to **Pitchfork Reviews** are listed here.
 Versions follow `MAJOR.MINOR.PATCH`.
 
+## 0.9.42 — 2026-09-17
+
+Spotify joins as a fourth service, every review shows its Pitchfork score, and the review lists
+can be read highest score first.
+
+### Improvements
+
+- **Spotify.** Reviews now match and play from Spotify too, through the **Spotty** plugin. It
+  sits fourth in the search order by default, so it is used when Qobuz, Tidal and Deezer don't
+  have the album. Change its priority, or set it to 0 to turn it off, on the settings page like
+  any other service.
+- **The Pitchfork score on every review.** Best New Music, High Scoring Albums and Latest
+  Reviews show the score at the start of each row's second line, as **Score 8.4/10**. The year-end
+  lists are ranked rather than scored, so they show none.
+- **View: Score.** The control at the top of each review list now cycles **View: Genre →
+  Week → Score**. Score gives one flat list, highest first, headed with the number of albums
+  matched. Your existing Genre or Week choice carries over.
+- **Reviews titled "Title: Subtitle" now find their album.** When a service has nothing
+  under the full title, the plugin searches again on the part before the colon.
+
+### Fixes
+
+- **A busy Spotify no longer marks albums as unmatched.** When Spotify is refusing requests
+  (rate-limiting), an empty answer is treated as "try again later", not as "not on Spotify".
+  The background refresh also slows down while this lasts, instead of adding to the
+  load.
+
 ## 0.9.34 — Best Albums of the Year, reviews that cover two records, and matching that stops getting it quietly wrong
 
 The largest release so far, and the one that adds a whole section. It also fixes a class of

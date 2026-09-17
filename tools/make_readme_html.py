@@ -22,7 +22,7 @@ import sys
 ZIP_NAME = "PitchforkReviews.zip"
 GITHUB_URL = "https://github.com/SimonArnold002/LMS-Pitchfork-Reviews"
 # The version badge is read live from install.xml; the rest are static.
-STATIC_BADGES = ["LMS 9.0.0+", "Material Skin", "Qobuz · Tidal · Deezer"]
+STATIC_BADGES = ["LMS 9.0.0+", "Material Skin", "Qobuz · Tidal · Deezer · Spotify"]
 
 
 def read_version(root):
