@@ -1353,6 +1353,7 @@ $T::Prefs::P{svc_priority_deezer} = 3;
     my $started = 0;
     my @held;
     my @HOLD = ({ name => 'Qobuz', icon => 'i', priority => 1, query_enc => 'bytes',
+                  rebuild => sub { },   # see @HOLD2: a stored row needs its adapter's reattach coderef
                   run  => sub { $started++; push @held, $_[5] } });
     {
         no warnings 'redefine';
@@ -1755,6 +1756,10 @@ $T::Prefs::P{svc_priority_deezer} = 3;
     my $searches = 0;
     my @held;
     my @HOLD2 = ({ name => 'Qobuz', icon => 'i', priority => 1, query_enc => 'bytes',
+                   # _rebuildStreamItems reattaches the ADAPTER'S OWN coderef and drops a
+                   # stored match whose adapter has none — so a fixture that serves a stored
+                   # row must carry one, or it measures the no-match placeholder instead.
+                   rebuild => sub { },
                    run  => sub { $searches++; push @held, $_[5] } });
     {
         no warnings 'redefine';
@@ -1926,11 +1931,9 @@ $T::Prefs::P{svc_priority_deezer} = 3;
     $searches = 0; @held = ();
     {
         no warnings 'redefine';
+        # @HOLD2 carries a `rebuild` coderef, which is what lets the stored row survive the
+        # read (_rebuildStreamItems drops any item whose adapter has none).
         local *Plugins::PitchforkReviews::Browse::_orderedAdapters = sub { @HOLD2 };
-        # _rebuildStreamItems reattaches the browse coderef by service and DROPS any item
-        # whose service can't supply one — so without this the stored row never survives
-        # the read and the assertions below would be measuring the no-match placeholder.
-        local *Plugins::Qobuz::Plugin::QobuzGetTracks = sub { };
 
         my @answers;
         $B->can('_findPlayable')->(undef, sub { push @answers, $_[0] }, 'Band', 'Record');
@@ -2845,6 +2848,7 @@ $T::Prefs::P{svc_priority_deezer} = 3;
     my $searches = 0;
     my @held;
     my @HOLD = ({ name => 'Qobuz', icon => 'i', priority => 1, query_enc => 'bytes',
+                  rebuild => sub { },   # see @HOLD2: a stored row needs its adapter's reattach coderef
                   run  => sub { $searches++; push @held, $_[5] } });
     my $hit = [ { title => 'Record', artist => 'Band', id => 3, image => 'https://i/c.jpg' } ];
 
@@ -2888,8 +2892,7 @@ $T::Prefs::P{svc_priority_deezer} = 3;
     $searches = 0; @held = ();
     {
         no warnings 'redefine';
-        local *Plugins::PitchforkReviews::Browse::_orderedAdapters = sub { @HOLD };
-        local *Plugins::Qobuz::Plugin::QobuzGetTracks = sub { };
+        local *Plugins::PitchforkReviews::Browse::_orderedAdapters = sub { @HOLD };   # @HOLD carries `rebuild`
 
         my $served = 0;
         $B->can('_findPlayable')->(undef, sub {}, 'Band', 'Record');

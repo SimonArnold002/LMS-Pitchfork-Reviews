@@ -89,8 +89,9 @@ my %EN = (
     PLUGIN_PITCHFORKREVIEWS_GENRE             => 'Genre',
     PLUGIN_PITCHFORKREVIEWS_REFRESH_MATCH     => 'Refresh streaming match',
     PLUGIN_PITCHFORKREVIEWS_REFRESH           => 'Refresh (force update now)',
-    PLUGIN_PITCHFORKREVIEWS_GROUPED_BY        => 'Grouped by %s (tap to change)',
+    PLUGIN_PITCHFORKREVIEWS_VIEW_BY           => 'View: %s (tap to change)',
     PLUGIN_PITCHFORKREVIEWS_GROUP_BY_GENRE    => 'Genre',
+    PLUGIN_PITCHFORKREVIEWS_VIEW_SCORE        => 'Score',
     PLUGIN_PITCHFORKREVIEWS_EMPTY             => 'No reviews found',
     PLUGIN_PITCHFORKREVIEWS_GENRE_OTHER       => 'Other',
 );
@@ -237,7 +238,7 @@ print "--- list view: Options section then the grouped content ---\n";
     ok('...as a divider',               $it[0]{type} ne 'text');
     ok('...keeping its image',          length($it[0]{image} // ''));
     ok('the action rows follow',
-       $it[1]{name} =~ /^Refresh/ && $it[2]{name} =~ /^Grouped by/);
+       $it[1]{name} =~ /^Refresh/ && $it[2]{name} =~ /^View: /);
     ok('then a genre divider before the reviews', $it[3]{type} ne 'text');
     is('then the review rows',          $it[4]{name}, 'Dijon - Baby');
 

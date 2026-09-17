@@ -21,7 +21,9 @@ sub prefs {
     # NB `group_by` is deliberately absent: since 0.8.2 the grouping mode is flipped
     # by the "Grouped by …" row on the review views themselves (the fleet convention
     # for per-view reading choices), not here. The pref itself is unchanged.
-    return ($prefs, qw(svc_priority_qobuz svc_priority_tidal svc_priority_deezer debug_log));
+    # The service list comes from Browse::@SERVICES, the one table every service list reads.
+    require Plugins::PitchforkReviews::Browse;
+    return ($prefs, (map { "svc_priority_$_->[0]" } @Plugins::PitchforkReviews::Browse::SERVICES), 'debug_log');
 }
 
 sub handler {
@@ -35,7 +37,8 @@ sub handler {
         # ListenBrainz Fresh Releases plugin.) These prefs are in the prefs()
         # list, so write the sanitised value back into $params BEFORE
         # SUPER::handler re-sets each pref from $params->{pref_*}.
-        for my $svc (qw(qobuz tidal deezer)) {
+        require Plugins::PitchforkReviews::Browse;
+        for my $svc (map { $_->[0] } @Plugins::PitchforkReviews::Browse::SERVICES) {
             my $p = $params->{"pref_svc_priority_$svc"};
             if (defined $p && $p =~ /^\d+$/) {
                 $p = 9 if $p > 9;

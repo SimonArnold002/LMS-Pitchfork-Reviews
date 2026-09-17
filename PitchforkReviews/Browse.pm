@@ -194,7 +194,16 @@ use constant STREAM_KEY_PREFIX       => 'pfr:stream:';
 # sit unmatched for a day after the install.
 # PARSE_VERSION stays at 3 — still no article parsing or fetching change, so re-pulling
 # 17.5MB of articles would be cost with no test value.
-use constant STREAM_KEY_VERSION      => 26;
+#
+# :26: -> :27: (0.9.36). A CORRECTNESS BUMP. 0.9.35's first warm, with Spotify at priority 1 on
+# Spotty's shared default Client ID, drew hundreds of Spotify 502s and 429s; each read as "not on
+# Spotify", so the next service's match was written at STREAM_FOUND_TTL — rows pinned to Qobuz
+# for thirty days that Spotify carries. 0.9.36 caps that case at a day (`empty_unverified`), but
+# only for entries written from here on, so the ones already in the store must go. The bump sends
+# the whole store through a cold warm again; what keeps that from re-pinning rows is the same
+# build's `empty_unverified` cap and the 429 back-off, not a slow warm (rejected — see
+# PACED_WARM_GAP).
+use constant STREAM_KEY_VERSION      => 27;
 
 # How long a coalescing slot may be joined before it is assumed wedged (see
 # _findPlayable). Comfortably past the worst honest resolve — four serial
@@ -474,28 +483,40 @@ sub fetchFeed {
         _resolveSection($client, $items, sub {
             my $mode = _groupBy();
 
-            # Options section (Material header + its rows) on top, then the grouped
-            # content under its own genre/week dividers — the same shape as the year
-            # view and the sibling ListenBrainz plugin. The action rows used to sit
-            # bare above the first divider, which read as two unexplained rows
-            # before the list started.
+            # Options section (Material header + its rows) on top, then the content —
+            # under genre/week dividers, or as one flat score-ranked list — the same
+            # shape as the year view and the sibling ListenBrainz plugin. The action
+            # rows used to sit bare above the first divider, which read as two
+            # unexplained rows before the list started.
             my @opt  = ( _refreshRow($client, $source), _groupToggle($client, $mode) );
             my @rows = ( _sectionHeader($client, cstring($client, 'PLUGIN_PITCHFORKREVIEWS_SECTION_OPTIONS'), $headers, \@opt),
                          @opt );
 
             if (@$items) {
-                push @rows, @{ _groupedRows($client, $items, $headers, $mode) };
+                push @rows, @{ _groupedRows($client, $items, $headers, $mode, $source) };
             }
             else {
                 push @rows, { name => cstring($client, 'PLUGIN_PITCHFORKREVIEWS_EMPTY'), type => 'text' };
             }
 
-            # These lists group under genre/week dividers, so unlike the year view they
-            # carry no header with a count to fold the progress into. The PAGE TITLE
-            # takes it instead — also not a row, so the same "nothing is added or
-            # removed" rule holds. Emitted only while incomplete: a finished list keeps
-            # the title Material already derives from the tile that opened it, so
-            # nothing changes on the normal (warm) path.
+            # WHERE THE MATCH COUNT GOES DEPENDS ON THE MODE, because it must appear
+            # exactly ONCE. The two GROUPING modes have no header of their own to hang
+            # it on — their dividers name a genre or a week — so the PAGE TITLE takes
+            # it, which is also not a row and so keeps the "nothing is added or
+            # removed" rule. Emitted only while incomplete: a finished list keeps the
+            # title Material already derives from the tile that opened it, so nothing
+            # changes on the normal (warm) path.
+            #
+            # THE SCORE MODE HAS A HEADER (_scoreRows), and it already carries the
+            # count — so the title here must be the plain section name, or the page
+            # says "(12 of 30)" twice. Same reasoning as the year view, which names
+            # the list in its header and passes `title => $label` bare.
+            if ($mode eq 'score') {
+                $cb->({ items => \@rows, cachetime => 0,
+                        title => cstring($client, _sourceTitleToken($source)) });
+                return;
+            }
+
             my $progress = @$items ? _matchProgress($client, $items) : '';
             $cb->({ items => \@rows, cachetime => 0,
                     ($progress =~ /^ \(\d+\)$/ ? ()
@@ -1360,6 +1381,47 @@ use constant WARM_YIELD_RECHECK => 3;   # seconds between "is the user still bro
 # width. A genuinely busy foreground still gets two full minutes of priority.
 use constant WARM_YIELD_MAX => 120;
 
+# BACKING THE WARM OFF WHILE A SERVICE IS REFUSING US (0.9.36; reactive since 0.9.37).
+#
+# Measured on the live server, 2026-09-15: once the Spotify adapter re-keyed the store, the
+# startup warm drew 184 Spotify `502 Bad Gateway`s inside a minute and the year backfill drew
+# `429 Too Many Requests` (retry after 3-7s). Ten Refreshes fired together on a quiet server drew
+# none, so ordinary width is fine and the trouble is a sustained burst into a refusing quota.
+#
+# 0.9.36 paced the WHOLE warm (one album, a 1s gap) whenever Spotify was on Spotty's shared default
+# Client ID. REJECTED BY SIMON AS FAR TOO SLOW — a cold pass went from about a minute to twenty or
+# more, a big step backwards when no other service makes the warm wait. Do not restore it. The
+# warm now runs at full width and backs off ONLY WHILE an adapter says it is being refused
+# (`pace_warm`, asked before every dispatch): one album at a time, PACED_WARM_GAP after each live
+# resolve, back to full width once the refusals stop. A healthy run pays nothing.
+#
+# THE WARM ONLY. A view has a person waiting on it and a shelf has a carousel to fill.
+#
+# THE PUMP, NOT A QUEUE IN FRONT OF THE SEARCH: every service leg carries a STREAM_SVC_TIMEOUT
+# watchdog, so a search held in a queue longer than that would be recorded ERRORED without ever
+# being sent. A cache hit answers synchronously (from inside the pump — see $pumping) and never
+# waits.
+#
+# BUT SYNCHRONOUS IS NOT CACHED (0.9.39). Spotty refuses in the same call stack, so a refusal also
+# answers from inside the pump. The resolver tags it (`_refused`, set in `_svcCantAnswer`, carried
+# through `_findPlayable`, `_findPlayableSubtitle` and `_findPlayableReview`) and the pump holds on
+# it; before that a Spotify-only warm ran every album through the lockout in one turn. The gap is
+# ONE re-armed wakeup plus `$holding`, which stops the launch loop — see the note in the pump. Same
+# fix as LBF 1.0.5; the rules are in docs/streaming-adapter-spec.md §6.
+#
+# WHAT IT CANNOT SEE: a 502 or a timeout carries no signal through Spotty, so those are not backed
+# off from. What they cost is bounded by `empty_unverified` (see _streamTtl): a row that loses
+# Spotify to one is held a day, not thirty.
+use constant PACED_WARM_GAP => 2;   # seconds between live resolves while backing off
+
+sub _pacedWarm {
+    for my $a (_orderedAdapters()) {
+        my $want = $a->{pace_warm};
+        return 1 if ref $want eq 'CODE' && eval { $want->() };
+    }
+    return 0;
+}
+
 # In-flight foreground (non-warm) _findPlayable calls, across every section being
 # resolved. The warm reads this and stands down; nothing else may write it.
 my $FG_INFLIGHT = 0;
@@ -1421,6 +1483,13 @@ sub _resolveSection {
     # normally, which is the only case that ever needed to.
     my $pumping  = 0;
     my $yielding = 0;   # when this warm first stood down (see WARM_YIELD_MAX)
+    # THE BACK-OFF GAP (0.9.39): ONE wakeup, re-armed, and a flag that stops the LAUNCH LOOP
+    # while it is pending. One timer per completion left a stray wakeup per album in flight when
+    # the back-off began, and each stray launched a search straight after the one before it
+    # completed — no gap at all. $holding matters because a hold decided from INSIDE the loop (a
+    # synchronous refusal) does not stop the loop by arming a timer. See PACED_WARM_GAP.
+    my $holding  = 0;
+    my $gapTimer;
 
     # WIDTH IS RE-READ EVERY ITERATION, not fixed at entry (0.9.10). A warm pinned
     # at WARM_CONCURRENCY was the right fix for the wrong problem: 0.9.1 narrowed it
@@ -1448,6 +1517,7 @@ sub _resolveSection {
     # starts. That restores the shelf fill without putting back the starvation.
     my $widthNow = sub {
         return BUILD_CONCURRENCY if $mode eq 'view';
+        return 1 if $warm && _pacedWarm();   # backing off — see PACED_WARM_GAP
         return $FG_INFLIGHT ? WARM_CONCURRENCY : BUILD_CONCURRENCY;
     };
     my $pump = sub {
@@ -1474,13 +1544,14 @@ sub _resolveSection {
         }
         $yielding = 0;
 
-        while ($active < $widthNow->() && @queue) {
+        while (!$holding && $active < $widthNow->() && @queue) {
             my $it = shift @queue;
             $active++;
             my $counted = $mode eq 'view';   # decrement exactly once, whatever the callback does
             $FG_INFLIGHT++ if $counted;
             _findPlayableReview($client, sub {
                 my $res = shift;
+                my $refusedNow = ref $res eq 'HASH' && $res->{_refused};
                 # ONE node per SIDE, in the order the resolver returned them. For an
                 # ordinary review that is simply the first match (every node is side 0,
                 # and the editions/services behind it are alternatives to the SAME
@@ -1509,8 +1580,28 @@ sub _resolveSection {
                 $FG_INFLIGHT-- if $counted;
                 $counted = 0;
                 $complete->() if $done >= $total;
+                # A warm that is BACKING OFF spaces LIVE resolves only. $pumping is still set when
+                # this runs synchronously from inside the loop below, which is USUALLY a cache hit,
+                # and then the loop simply carries on; an async completion was a real search, so the
+                # next one waits.
+                #
+                # ONE EXCEPTION (0.9.39): a synchronous REFUSAL. Spotty refuses in the same call
+                # stack (`getToken` does `return $cb->(-429)`), so "synchronous" does not mean
+                # "cached" — a Spotify-only warm ran every album through the lockout in one turn,
+                # each stored "couldn't check" for STREAM_INCONCLUSIVE_TTL. The resolver says so
+                # (`_refused`), and the pump holds on it.
+                if ($warm && @queue && _pacedWarm() && (!$pumping || $refusedNow)) {
+                    $holding = 1;
+                    Slim::Utils::Timers::killSpecific($gapTimer) if $gapTimer;
+                    $gapTimer = Slim::Utils::Timers::setTimer(undef, time() + PACED_WARM_GAP, sub {
+                        $gapTimer = undef;
+                        $holding  = 0;
+                        $self->($self);
+                    });
+                    return;
+                }
                 $self->($self);   # keep resolving to warm the cache even past the render deadline
-            }, $it->{artist}, $it->{album});
+            }, $it->{artist}, $it->{album}, undef, _subtitleMinYear($it));
         }
         $pumping = 0;
     };
@@ -1597,7 +1688,7 @@ sub _reviewRow {
         # so relabel ALL of them to the review's "Artist - Album" + capsule.
         $row{name}  = $line1;
         $row{line1} = $line1;
-        $row{line2} = _line2($it);
+        $row{line2} = _line2($client, $it);
         # Prefer the album cover, then the Pitchfork cover, then the service logo —
         # so a match with no album art still shows real artwork, not just the logo.
         # _fitCover caps an oversized service cover (see MAX_COVER_PX); it is applied
@@ -1615,7 +1706,7 @@ sub _reviewRow {
     return {
         name        => $line1,
         line1       => $line1,
-        line2       => _line2($it),
+        line2       => _line2($client, $it),
         image       => (_fitCover($it->{cover}) || DIVIDER_ICON),   # always set (keeps Material's grid view enabled)
         type        => 'link',
         url         => \&reviewDetail,
@@ -1735,16 +1826,60 @@ sub _attachReviewLink {
     };
 }
 
-# Second line: "date · genre - truncated capsule" (each part dropped if absent).
+# Pitchfork's review score, rendered for DISPLAY ONLY as "8.4/10" (0.9.40).
+#
+# WHY THIS IS THE SECTION TEST. Asked for on the three review sections (Best New Music,
+# High Scoring Albums, Latest Reviews) and NOT on the year-end lists, which have no score
+# to show. No section plumbing is needed to draw that line: `_parseYear` sets
+# `score => undef` on every year entry it builds (API.pm, "year-end lists carry no score")
+# and the DB column is NULLABLE for exactly that reason, so `defined` already separates the
+# two shapes. A ranked row can never reach the true branch.
+#
+# `defined`, NOT truthiness. Pitchfork really does award 0.0 (Jet, *Shine On*), and a
+# truth test would silently drop precisely the score most worth reading.
+#
+# sprintf %.1f because the site's own idiom is one decimal throughout — JSON gives back a
+# bare 10 or 8 for a round score, and "10/10" next to "8.4/10" reads as a different scale.
+# The pattern guard is what keeps a non-numeric out of sprintf: `ratingValue.score` is
+# whatever the page's state happens to hold, and an unexpected string would otherwise
+# render as "0.0/10" — a real score that was never awarded.
+#
+# THE WORD IS TRANSLATED, NOT A LITERAL (0.9.41). "Score 8.1/10" was asked for over the bare
+# number; the plugin ships EN and NL, and `_line2`'s other worded part (the detail page's
+# "Genre: …") goes through `cstring`, so this does too. That is the whole reason `_line2` and
+# this sub take `$client` — both `_reviewRow` call sites already had one to pass.
+sub _scoreLabel {
+    my ($client, $it) = @_;
+    my $s = ($it || {})->{score};
+    return '' unless defined $s && !ref $s && $s =~ /^\d+(?:\.\d+)?$/;
+    return cstring($client, 'PLUGIN_PITCHFORKREVIEWS_SCORE') . sprintf(' %.1f/10', $s);
+}
+
+# Second line: "Score 8.4/10 · date · genre - truncated capsule" (each part dropped if absent).
 # On a year-end row the leading meta is the YEAR instead of the date: every entry
 # in a list shares one publication date, so repeating it down all 50 rows says
 # nothing, while the year is what the row is actually about.
+#
+# THE SCORE GOES HERE, ON line2, AND MUST NEVER MOVE TO line1/name. A Pitchfork row that
+# matched on SPOTIFY carries no `&al=` handshake — `_attachFavUrl` is skipped wholesale for
+# a `native_favurl` adapter, and decorating the favurl is settled as wrong (CLAUDE.md A2) —
+# so ListenLater stores that row's LABEL as the album title. Measured on plex:9000:
+# `favorites_title "The Cure - Mixed Up"`, High Scoring Albums. Anything added to the label
+# lands in LL's database; line2 is read by nothing on its add path. line1 is byte-for-byte
+# unchanged by this feature, in every section, matched or not.
+#
+# AND IT IS DISPLAY ONLY in the other direction too: `_line2` is called from the two
+# `_reviewRow` returns and nowhere else. It feeds no cache key, no favurl and no search —
+# the streaming resolver queries `$it->{artist}` / `$it->{album}`, which this never touches.
+# Material's own search-within-list DOES scan the subtitle (search-list.js reads title AND
+# subtitle), but that line already carries the date, the genre and the capsule prose, so the
+# score adds no surface that was not already there.
 sub _line2 {
-    my ($it) = @_;
+    my ($client, $it) = @_;
     my $cap = $it->{capsule} // '';
     $cap = substr($cap, 0, ROW_CAPSULE_MAX) . '...' if length($cap) > ROW_CAPSULE_MAX;
     my $lead = defined $it->{rank} ? ($it->{year} // '') : _shortDate($it->{date});
-    my $meta = join(" \x{b7} ", grep { length } $lead, ($it->{genre} // ''));
+    my $meta = join(" \x{b7} ", grep { length } _scoreLabel($client, $it), $lead, ($it->{genre} // ''));
     return join(' - ', grep { length } $meta, $cap);
 }
 
@@ -1823,7 +1958,7 @@ sub reviewDetail {
     _findPlayableReview($client, sub {
         my $res = shift;
         $finish->($res->{items} || []);
-    }, $it->{artist}, $it->{album});
+    }, $it->{artist}, $it->{album}, undef, _subtitleMinYear($it));
 }
 
 # "Refresh streaming match": force-re-resolve THIS album past the cache (which
@@ -1843,7 +1978,7 @@ sub _refreshMatchRow {
             # most needs a manual retry is the one it can't reach.
             _findPlayableReview($c, sub {
                 $cb->({ items => [], nextWindow => 'refresh' });
-            }, $pt->{artist}, $pt->{album}, 1);   # $force = 1 -> skip the cache read
+            }, $pt->{artist}, $pt->{album}, 1, _subtitleMinYear($pt));   # $force = 1 -> skip the cache read
         },
     };
 }
@@ -1910,44 +2045,60 @@ sub _headerType {
     return $_headerTypeCache = $useBasic ? 'header-basic' : 'header';
 }
 
-# Dispatch a review list to a grouping mode: 'genre' (the default) groups under
-# each Pitchfork genre; 'date' keeps the weekly dividers. Either way the feed items
-# arrive newest-first (API sorts by date), so date order is preserved within every
-# bucket — and BOTH modes emit the same branded Material divider (_divHeader), so
-# switching mode changes what the headers say, never whether there are headers.
+# Dispatch a review list to a layout mode: 'genre' (the default) groups under each
+# Pitchfork genre; 'date' keeps the weekly dividers; 'score' abandons grouping
+# altogether for ONE FLAT LIST, highest score first. The two GROUPING modes leave the
+# feed's newest-first order intact within every bucket and emit the same branded
+# Material divider (_divHeader), so switching between them changes what the headers
+# say, never whether there are headers. 'score' emits no dividers at all — it renders
+# the year view's shape instead (one bold header with the count, then the rows).
 #
 # Flipped in place by _groupToggle on the view (0.8.2), the same mechanics as the
 # year-list sort. It was a Settings-page radio until then; the pref is unchanged,
 # so an existing choice carries over untouched.
-my @GROUP_MODES = ('genre', 'date');
+my @GROUP_MODES = ('genre', 'date', 'score');
 
 sub _groupBy {
     my $m = $prefs->get('group_by') || 'genre';
     return (grep { $_ eq $m } @GROUP_MODES) ? $m : 'genre';
 }
 
+# THE DISPATCH IS TOTAL OVER @GROUP_MODES, and that is the point of writing it as a
+# ladder ending in a NAMED mode rather than a bare fallback (0.9.42). It used to read
+# "genre, else weekly", which was fine while those were the only two — but $mode
+# defaults to _groupBy(), so the moment 'score' joined the pref's value set, an
+# unhandled mode would have rendered WEEKS under a control that said Score. A silent
+# wrong layout, not an error. Anything unrecognised still lands on 'genre', the same
+# value _groupBy itself falls back to, so the two agree.
 sub _groupedRows {
-    my ($client, $items, $headers, $mode) = @_;
+    my ($client, $items, $headers, $mode, $source) = @_;
     $mode ||= _groupBy();
-    return _genreRows($client, $items, $headers) if $mode eq 'genre';
-    return _weeklyRows($client, $items, $headers);
+    return _weeklyRows($client, $items, $headers)          if $mode eq 'date';
+    return _scoreRows($client, $items, $headers, $source)  if $mode eq 'score';
+    return _genreRows($client, $items, $headers);
 }
 
 sub _groupLabel {
     my ($client, $mode) = @_;
-    return cstring($client, ($mode // 'genre') eq 'date'
-        ? 'PLUGIN_PITCHFORKREVIEWS_GROUP_WEEK'
-        : 'PLUGIN_PITCHFORKREVIEWS_GROUP_BY_GENRE');
+    $mode //= 'genre';
+    return cstring($client, $mode eq 'date'  ? 'PLUGIN_PITCHFORKREVIEWS_GROUP_WEEK'
+                          : $mode eq 'score' ? 'PLUGIN_PITCHFORKREVIEWS_VIEW_SCORE'
+                          :                    'PLUGIN_PITCHFORKREVIEWS_GROUP_BY_GENRE');
 }
 
-# "Grouped by <mode> (tap to change)" — identical mechanics to _yearSortToggle:
-# durable pref, advanced from the LIVE pref (so a stale view can't set it
-# backwards), nextWindow => 'refresh' on an EMPTY response to re-walk in place.
-# Shared by all three review feeds, because the pref is shared.
+# "View: <mode> (tap to change)" — identical mechanics to _yearSortToggle: durable
+# pref, advanced from the LIVE pref (so a stale view can't set it backwards),
+# nextWindow => 'refresh' on an EMPTY response to re-walk in place. Shared by all
+# three review feeds, because the pref is shared.
+#
+# THE VERB IS "View", NOT "Grouped by" (0.9.42, Simon's call). Two of the three modes
+# GROUP and the third SORTS, so no single accurate verb existed: "Grouped by Score"
+# would have described a list with no groups in it. "View:" is honest about all three.
+# The old PLUGIN_PITCHFORKREVIEWS_GROUPED_BY token is retired with it.
 sub _groupToggle {
     my ($client, $mode) = @_;
     return {
-        name       => sprintf(cstring($client, 'PLUGIN_PITCHFORKREVIEWS_GROUPED_BY'),
+        name       => sprintf(cstring($client, 'PLUGIN_PITCHFORKREVIEWS_VIEW_BY'),
                               _groupLabel($client, $mode)),
         type       => 'link',
         image      => SORT_ICON,
@@ -2002,6 +2153,61 @@ sub _weeklyRows {
         push @rows, map { _reviewRow($client, $_, $headers) } @$wk;
     }
     return \@rows;
+}
+
+# ---------------------------------------------------------------------------
+# THE SCORE VIEW (0.9.42): one flat list, highest first, no dividers.
+#
+# WHY THE SHAPE IS A SCHWARTZIAN TRANSFORM WITH AN EXPLICIT SECOND KEY, copied from
+# the sibling plugin's `_sortWithin` (LBF Browse.pm) rather than reinvented:
+#
+#   1. PERL'S SORT IS NOT GUARANTEED STABLE. It is mergesort in practice, but the
+#      language only promises stability under `use sort 'stable'`, and this list is
+#      addressed by POSITION — XMLBrowser's item_id is a positional crumb re-resolved
+#      against a freshly rebuilt feed, and this plugin's coderef top level mints no
+#      session cache, so every click rebuilds the whole tree. An order that differed
+#      between two walks would open the WRONG ROW. The tie-break is therefore stated,
+#      not inherited.
+#   2. THE TIES ARE NOT AN EDGE CASE, THEY ARE THE COMMON CASE. Measured live
+#      2026-09-16: Best New Music had 29 rows across SIX distinct scores (largest tie
+#      cluster 8), High Scoring Albums 29 rows across nine (largest cluster 14).
+#      These are curated high-score lists, so on two of the three sections the
+#      SECOND key does most of the ordering. Date, newest first — the order the feed
+#      arrives in, so a tied run reads exactly as it does in the other two modes.
+#   3. The key is computed ONCE PER ROW. sort calls its comparator O(n log n) times.
+#
+# A ROW WITH NO USABLE SCORE SORTS TO THE BOTTOM AND IS NEVER DROPPED. `-1` is the
+# floor because a bare `undef` numifies to 0, which would file an unscored review
+# above a real 0.0 — and Pitchfork awards 0.0. Dropping such a row instead was never
+# an option: changing MEMBERSHIP between renders is the other half of the positional
+# crumb problem. The guard is `_scoreLabel`'s, so a value that will not render as a
+# score is also not sorted as one — one rule, not two that can disagree.
+sub _scoreOrdered {
+    my ($items) = @_;
+    return [] unless ref $items eq 'ARRAY';
+    return [ map  { $_->[2] }
+             sort { $b->[0] <=> $a->[0] || $b->[1] cmp $a->[1] }
+             map  { my $s = $_->{score};
+                    [ (defined $s && !ref $s && $s =~ /^\d+(?:\.\d+)?$/ ? $s + 0 : -1),
+                      ($_->{date} // ''), $_ ] } @$items ];
+}
+
+# The flat score list: ONE bold header carrying the section name and the live match
+# count, then every row. This is the year view's assembly (fetchYearFeed), reused
+# deliberately — it is the plugin's only other flat list, and a second layout for the
+# same job would drift from it. `$noIcon` is NOT set, so the header keeps the branded
+# thumbnail the genre/week dividers have.
+#
+# The count comes from _matchProgress, which is why the header exists at all: the two
+# grouping modes have no header to hang it on and fold it into the PAGE TITLE instead
+# (see fetchFeed). With a header here, the title must not also carry it.
+sub _scoreRows {
+    my ($client, $items, $headers, $source) = @_;
+    my $ordered = _scoreOrdered($items);
+    my @albums  = map { _reviewRow($client, $_, $headers) } @$ordered;
+    my $label   = cstring($client, _sourceTitleToken($source // 'reviews'))
+                . _matchProgress($client, $ordered);
+    return [ _sectionHeader($client, $label, $headers, \@albums), @albums ];
 }
 
 # Group items by their PRIMARY Pitchfork genre, emitting a genre divider + that
@@ -2128,12 +2334,32 @@ sub _streamingAdapters {
     return @found;
 }
 
+# THE ONE LIST OF KNOWN SERVICES: [ pref key, adapter name ]. The priority memo stamp,
+# the settings page's service rows and Settings.pm's prefs + sanitise loop all read this,
+# so a service added here is added everywhere. It used to be four hand-maintained copies,
+# and the memo stamp's copy was the dangerous one: a service missing from it would never
+# invalidate the memo when its priority changed (streaming-adapter-spec §8).
+our @SERVICES = (
+    [ 'qobuz',   'Qobuz'   ],
+    [ 'tidal',   'Tidal'   ],
+    [ 'deezer',  'Deezer'  ],
+    [ 'spotify', 'Spotify' ],
+);
+
+# Each adapter carries its own `rebuild` coderef — the browse handler _rebuildStreamItems
+# reattaches to a cached match (the renderer's coderef `url` cannot survive Storable).
+# It is taken INSIDE the same ->can guard that registers the adapter, so it always names a
+# sub that exists. `native_favurl` marks a service whose renderer already ships a working,
+# replayable favorites_url that _attachFavUrl must not overwrite. `empty_unverified` marks a
+# service whose EMPTY answer cannot be told from an error (read by _streamTtl), and `pace_warm`
+# is a coderef answering "slow the background warm down for me" (read by _resolveSection).
 sub _detectAdapters {
     my @adapters;
 
     push @adapters, {
         name => 'Qobuz', icon => _pluginIcon('Plugins::Qobuz::Plugin'),
         run  => \&_searchQobuz, query_enc => 'chars',
+        rebuild => \&Plugins::Qobuz::Plugin::QobuzGetTracks,
     } if Plugins::Qobuz::Plugin->can('getAPIHandler')
       && Plugins::Qobuz::Plugin->can('_albumItem')
       && Plugins::Qobuz::Plugin->can('QobuzGetTracks');   # reattach method for cached matches (see _rebuildStreamItems)
@@ -2141,6 +2367,7 @@ sub _detectAdapters {
     push @adapters, {
         name => 'Tidal', icon => _pluginIcon('Plugins::TIDAL::Plugin'),
         run  => \&_searchTidal, query_enc => 'chars',
+        rebuild => \&Plugins::TIDAL::Plugin::getAlbum,
     } if Plugins::TIDAL::Plugin->can('getAPIHandler')
       && Plugins::TIDAL::Plugin->can('getAlbum')
       && Plugins::TIDAL::Plugin->can('_renderAlbum');
@@ -2154,9 +2381,30 @@ sub _detectAdapters {
     push @adapters, {
         name => 'Deezer', icon => _pluginIcon('Plugins::Deezer::Plugin'),
         run  => \&_searchDeezer, query_enc => 'bytes',
+        rebuild => \&Plugins::Deezer::Plugin::getAlbum,
     } if Plugins::Deezer::Plugin->can('getAPIHandler')
       && Plugins::Deezer::Plugin->can('_renderAlbum')
       && Plugins::Deezer::Plugin->can('getAlbum');
+
+    # Spotify — via the Spotty plugin, an OLDER, independent codebase (not the
+    # Qobuz/TIDAL/Deezer family): getAPIHandler is a CLASS method, the renderers live in
+    # OPML.pm, and search results arrive already normalised. Album nodes are the
+    # Tidal/Deezer shape (coderef url => \&OPML::album, spotify:album:<id> uri in
+    # passthrough), so they round-trip the cache the same way. Ported from the sibling
+    # ListenBrainz plugin (PR #17, honzup); Spotty's API is verified against its source in
+    # that repo's docs/spotify-spotty-adapter-pr17.md. Probes only the three methods this
+    # adapter calls (there is no track leg here, so no `trackList`).
+    push @adapters, {
+        name => 'Spotify', icon => _pluginIcon('Plugins::Spotty::Plugin'),
+        run  => \&_searchSpotify, query_enc => 'chars',
+        rebuild => \&Plugins::Spotty::OPML::album,
+        native_favurl => 1,
+        # 0.9.36, both measured on the live server — see _streamTtl and PACED_WARM_GAP.
+        empty_unverified => 1,                        # Pipeline turns a 502/timeout/429 into `[]`
+        pace_warm        => \&_spotifyBackingOff,     # Spotify refused a search moments ago
+    } if Plugins::Spotty::Plugin->can('getAPIHandler')
+      && Plugins::Spotty::OPML->can('_albumItem')
+      && Plugins::Spotty::OPML->can('album');
 
     return @adapters;
 }
@@ -2171,7 +2419,7 @@ sub _detectAdapters {
 my ($_ordered, $_orderStamp, $_svcOrder);
 
 sub _orderedAdapters {
-    my $stamp = join(',', map { $prefs->get("svc_priority_$_") // '' } qw(qobuz tidal deezer));
+    my $stamp = join(',', map { $prefs->get("svc_priority_$_->[0]") // '' } @SERVICES);
     return @$_ordered if $_ordered && $_orderStamp eq $stamp;
 
     my @out;
@@ -2249,7 +2497,7 @@ sub _retireOldStreamKeys {
 # Detection + priority for every known service (installed or not) — drives the
 # settings page's service list.
 sub serviceStatus {
-    my @known = ( [ 'qobuz', 'Qobuz' ], [ 'tidal', 'Tidal' ], [ 'deezer', 'Deezer' ] );
+    my @known = @SERVICES;
     my %installed = map { lc($_->{name}) => 1 } _streamingAdapters();
     return [ map {
         {   key       => $_->[0],
@@ -2846,6 +3094,99 @@ sub _releaseAlts {
     return @out;
 }
 
+# --------------------------------------------------------------------------
+# SUBTITLED REVIEWS: "Title: Subtitle" (0.9.38)
+#
+# Pitchfork titles some records with a subtitle the services drop. Field case: Erykah Badu /
+# The Alchemist — *Before the World Blows: The Abi and Alan Experiment*, carried by Spotify AND
+# Qobuz as *Before The World Blows* (2026). `_albumMatches` tolerates extra words on the
+# CANDIDATE only (its prefix tier), so the service's SHORTER title can never match and the row
+# stays unplayable. Discography's ledger records the same class as a real, unresolved matcher gap.
+#
+# PFR CALL-SITE LOGIC, NOT A MATCHER CHANGE — the same class as the "A / B" split above, and
+# built the same way: THE FULL TITLE IS TRIED FIRST, so anything that resolves today resolves
+# identically, and the retry is reachable only down a path that already ended in "no match".
+#
+# MEASURED BEFORE IT WAS BUILT (audit 2026-09-15, CLAUDE.md "SCOPED … subtitle retry"): 633 unique
+# items across every feed and every year list 2016-2025, SIX with ": ". Two are fixed (Badu, and
+# Dawn Richard *Second Line: An Electro Revival*, which the services call *Second Line*); three
+# already match on the full title and never reach the retry; one fails on the ARTIST, which no
+# title rule can touch.
+#
+# THE GUARDS, each for a trap the audit found on real catalogue data:
+#   - EXACT only, on the pre-colon title (`_matchExactness`). Stops a prefix sibling: Spotify's
+#     *NEVER ENOUGH: PORCHES VERSION* would otherwise pass for *NEVER ENOUGH*.
+#   - A SERVICE RELEASE YEAR NO EARLIER THAN $minYear, and a match stating no year is refused.
+#     Exactness cannot stop the worst trap — the pre-colon text can be a DIFFERENT real record by
+#     the same artist. Turnstile's *NEVER ENOUGH: VERSIONS* (2026) shares its pre-colon title with
+#     their 2025 album *NEVER ENOUGH*; the year rejects it. `$minYear` comes from the CALLER
+#     (_subtitleMinYear): the review's year, or a year-end list's year MINUS ONE, because those
+#     lists include late-previous-year releases (*Song of Sage*, 2020, is in the 2021 list). No
+#     known year means no retry at all.
+#   - NEVER on a title that also carries a slash. That is the combined-review path's shape
+#     (*Song of Sage: Post Panic! / Navy's Reprise*), and two splitters working one title is how
+#     a fragment ends up trusted.
+#   - NEVER when the pre-colon text is the artist's own name, or too short to mean anything.
+#   - The artist gate is the matcher's, unchanged: *Homecoming* by America does not pass for
+#     Beyoncé's.
+#
+# THE GUARDS RUN HERE, ON EVERY CALL, never on what is cached. The pre-colon title resolves under
+# its OWN stream key, shared with any review whose title simply IS that text; the stored items are
+# that search's honest answer, and only this caller knows they are standing in for a longer title.
+sub _subtitleBase {
+    my ($album, $artist) = @_;
+    return undef unless defined $album && !ref $album;
+    return undef if $album =~ m{/};
+    my ($pre) = $album =~ /^(.*?):\s/ or return undef;
+    $pre =~ s/^\s+|\s+$//g;
+    my $pn = _norm($pre);
+    return undef unless length($pn) >= 2;
+    return undef if $pn eq _norm($album);
+    if (defined $artist && !ref $artist) {
+        my $an = _norm($artist);
+        return undef if length($an) && $pn eq $an;
+    }
+    return $pre;
+}
+
+# The earliest service release year a subtitle retry may accept for a row — see above. A
+# year-end entry carries `year` (one year of slack); a review carries an ISO `date`.
+sub _subtitleMinYear {
+    my ($it) = @_;
+    return undef unless ref $it eq 'HASH';
+    return $it->{year} - 1 if defined $it->{year} && !ref $it->{year} && $it->{year} =~ /^\d{4}$/;
+    return $1 if defined $it->{date} && !ref $it->{date} && $it->{date} =~ /^(\d{4})/;
+    return undef;
+}
+
+sub _findPlayableSubtitle {
+    my ($client, $callback, $artist, $album, $force, $minYear) = @_;
+    my $base = _subtitleBase($album, $artist);
+    return _findPlayable($client, $callback, $artist, $album, $force)
+        unless defined $base && defined $minYear && $minYear =~ /^\d{4}$/;
+
+    _findPlayable($client, sub {
+        my $res = shift;
+        return $callback->($res) if _realMatches($res);   # the full title matched: untouched
+        _findPlayable($client, sub {
+            my $sub = shift;
+            # EITHER search being refused is a refusal of this review (0.9.39) — see PACED_WARM_GAP.
+            $res->{_refused} = 1 if ref $sub eq 'HASH' && $sub->{_refused} && ref $res eq 'HASH';
+            my @cand = _realMatches($sub);
+            my @ok = grep {
+                my $y = $_->{_year};
+                _matchExactness($base, $_) eq 'exact'
+                    && defined $y && !ref $y && $y =~ /^(\d{4})/ && $1 >= $minYear
+            } @cand;
+            _dbgv("subtitled review '$album': full title missed; '$base' gave " . scalar(@cand)
+                . ' match(es), ' . scalar(@ok) . " exact and from $minYear or later");
+            # Nothing trustworthy: answer with the FULL title's own miss, exactly as before.
+            return $callback->($res) unless @ok;
+            $callback->({ items => _streamResult($client, \@ok), ($res->{_refused} ? (_refused => 1) : ()) });
+        }, $artist, $base, $force);
+    }, $artist, $album, $force);
+}
+
 # Resolve a REVIEW to playable nodes: `_findPlayable` for an ordinary title, and for
 # a combined "A / B" review the full title first, then each side.
 #
@@ -2868,15 +3209,23 @@ sub _releaseAlts {
 # editions, and appending side B behind them would let the cap silently delete the
 # second album — the exact failure this sub exists to fix.
 sub _findPlayableReview {
-    my ($client, $callback, $artist, $album, $force) = @_;
+    my ($client, $callback, $artist, $album, $force, $minYear) = @_;
 
     my ($sides, $requireAll) = _splitAlbumTitles($album, $artist);
-    return _findPlayable($client, $callback, $artist, $album, $force) unless $sides;
+    # An ordinary title — including a "Title: Subtitle" one, which gets its own guarded retry.
+    return _findPlayableSubtitle($client, $callback, $artist, $album, $force, $minYear) unless $sides;
     my @parts = @$sides;
 
+    # ANY search this review made being refused is a refusal of the review (0.9.39) — see
+    # PACED_WARM_GAP. Carried on every answer below.
+    my $refused = 0;
+    my $answer = sub { $callback->({ items => $_[0], ($refused ? (_refused => 1) : ()) }) };
+
     _findPlayable($client, sub {
-        my @full = _realMatches(shift);
-        return $callback->({ items => _streamResult($client, \@full) }) if @full;
+        my $fullRes = shift;
+        $refused = 1 if ref $fullRes eq 'HASH' && $fullRes->{_refused};
+        my @full = _realMatches($fullRes);
+        return $answer->(_streamResult($client, \@full)) if @full;
 
         _dbgv("combined review '$album' didn't match whole — trying " . scalar(@parts)
             . ' side(s)' . ($requireAll ? ', all of which must match' : ''));
@@ -2945,7 +3294,7 @@ sub _findPlayableReview {
                     unless (grep { @{ $perSide[$_] || [] } } 0 .. $#parts) {
                         _dbgv("combined review '$album': no side matched exactly — "
                             . 'discarding the unpadded split');
-                        return $callback->({ items => _streamResult($client, []) });
+                        return $answer->(_streamResult($client, []));
                     }
                 }
 
@@ -2956,11 +3305,13 @@ sub _findPlayableReview {
                         push @out, $perSide[$s][$rank] if $perSide[$s] && $perSide[$s][$rank];
                     }
                 }
-                return $callback->({ items => _streamResult($client, \@out) });
+                return $answer->(_streamResult($client, \@out));
             }
             my $side = $i++;
             _findPlayable($client, sub {
-                my @m = _realMatches(shift);
+                my $sideRes = shift;
+                $refused = 1 if ref $sideRes eq 'HASH' && $sideRes->{_refused};
+                my @m = _realMatches($sideRes);
                 # Tag a COPY, never the node the resolver cached/handed other callers.
                 $perSide[$side] = [ map { { %$_, _side => $side, _sidetitle => $parts[$side] } } @m ];
                 $self->($self);
@@ -2978,9 +3329,9 @@ sub _findPlayableReview {
 # runs the %RESOLVING slot is gone — a waiter that is not called here is never called at
 # all, and takes a $FG_INFLIGHT count with it if it came from a view.
 sub _serveWaiters {
-    my ($client, $items, $key, $waiters) = @_;
+    my ($client, $items, $key, $waiters, $refused) = @_;
     for my $w (@$waiters) {
-        eval { $w->({ items => _streamResult($client, $items) }); 1 }
+        eval { $w->({ items => _streamResult($client, $items), ($refused ? (_refused => 1) : ()) }); 1 }
             or $log->warn("resolve: a waiter for $key threw: $@");
     }
 }
@@ -3001,6 +3352,8 @@ sub _serveWaiters {
 #   winner, leg 2 answered                     FOUND         (was: !$unvalidated[$win])
 #   winner, leg 2 errored/timed out/undef      UNVALIDATED   (was:  $unvalidated[$win])
 #   winner, leg 2 had no API handler           UNVALIDATED   (was:  $unvalidated[$win])
+#   winner, an `empty_unverified` service
+#     above it did not win (0.9.36)            UNVALIDATED   (new — see the note in the sub)
 #   no winner, any transient failure           INCONCLUSIVE  (was:  $inconclusive)
 #   no winner, every service unavailable       INCONCLUSIVE  (was:  $unavailable == @adapters)
 #   no winner, some unavailable + some missed  NOMATCH
@@ -3019,9 +3372,24 @@ sub _serveWaiters {
 # INCONCLUSIVE — matching the old `0 == 0`, and the right answer anyway, though
 # `_findPlayable` returns before this on that path.
 sub _streamTtl {
-    my ($outcome, $nadapters, $win, $nitems) = @_;
+    my ($outcome, $nadapters, $win, $nitems, $unverified) = @_;
 
     if ($nitems) {
+        # AN UNVERIFIABLE EMPTY ANSWER ABOVE THE WINNER (0.9.36). A service flagged
+        # `empty_unverified` cannot tell "not in my catalogue" from "my API refused you": Spotty's
+        # Pipeline turns a 502, a timeout and a 429 into the same `[]` as a genuine zero-hit. When
+        # such a service OUTRANKS the winner, the row went to the lower service on an answer nobody
+        # can check, and FOUND would pin that for thirty days. Measured on the live server with
+        # Spotify at priority 1: the startup warm drew 184 Spotify 502s and 17 rows stayed on
+        # Qobuz. So the row is held like any other unchecked answer, and re-resolved within a day.
+        #
+        # ONLY ABOVE THE WINNER, and never a STANDING-unavailable one: a flagged service ranked
+        # below the row could not have taken it, and a signed-out one lost no answer. Unflagged
+        # services keep the settled rule — the winner's own outcome decides (0.9.29) — and a
+        # four-argument call gets exactly the table above it.
+        return STREAM_UNVALIDATED_TTL
+            if $unverified && $win
+            && grep { $unverified->[$_] && ($outcome->[$_] // '') ne OUTCOME_UNAVAILABLE } 0 .. $win - 1;
         return (($outcome->[$win] // '') eq OUTCOME_ANSWERED)
             ? STREAM_FOUND_TTL : STREAM_UNVALIDATED_TTL;
     }
@@ -3196,6 +3564,9 @@ sub _findPlayable {
     #               is not simply ignored either, because "nobody could search" is still not a
     #               verdict: it shortens the TTL only when EVERY adapter was unavailable.
     my @outcome;
+    # SOME SERVICE REFUSED A SEARCH IN THIS RESOLVE (0.9.39), put on the answer as `_refused`.
+    # The warm's pump needs it because a refusal can answer SYNCHRONOUSLY — see PACED_WARM_GAP.
+    my $refusedAny = 0;
 
     my $resolve = sub {
         return if $resolved;
@@ -3272,7 +3643,8 @@ sub _findPlayable {
         # carries the whole truth table and the note on why it is not inline any more.
         # $resolve does not reach here until every adapter has reported (the loop above
         # returns on the first undef `$result[$i]`), so @outcome is complete by construction.
-        my $ttl = _streamTtl(\@outcome, scalar(@adapters), $win, scalar(@$items));
+        my $ttl = _streamTtl(\@outcome, scalar(@adapters), $win, scalar(@$items),
+                             [ map { $_->{empty_unverified} ? 1 : 0 } @adapters ]);
         # A failed cache write must not take the ANSWER with it. The callers below are
         # waiting on a result we already hold; the worst case of not storing it is that the
         # next open re-resolves. (Same guard, same reason, as API.pm's fetch sites — see the
@@ -3292,6 +3664,9 @@ sub _findPlayable {
                               . _matchExactness($album, $items->[0])
                               . ((($outcome[$win] // '') ne OUTCOME_ANSWERED)
                                     ? ' UNVALIDATED (leg 2 never answered, '
+                                      . STREAM_UNVALIDATED_TTL . 's)'
+                                 : ($ttl == STREAM_UNVALIDATED_TTL)
+                                    ? ' UNVALIDATED (a higher-priority service\'s empty answer is unverifiable, '
                                       . STREAM_UNVALIDATED_TTL . 's)' : '')
                             : "no match" . ($nErrored ? " ($nErrored inconclusive)" : "")
                                          . ($nUnavail ? " ($nUnavail unavailable)"   : "")
@@ -3307,8 +3682,8 @@ sub _findPlayable {
         # for TRUTH, so ONE leak pins the warm at WARM_CONCURRENCY and every home shelf at
         # the narrow width for the life of the process. That is 0.9.23's finding-1 leak,
         # reintroduced from the publish side.
-        _serveWaiters($client, $items, $key, \@waiters);
-        $callback->({ items => _streamResult($client, $items) });
+        _serveWaiters($client, $items, $key, \@waiters, $refusedAny);
+        $callback->({ items => _streamResult($client, $items), ($refusedAny ? (_refused => 1) : ()) });
     };
 
     # Self-passing sub, not a self-capturing closure — see the $collect note below.
@@ -3343,7 +3718,10 @@ sub _findPlayable {
             # MEASURED in `_svcCantAnswer`, never claimed by a call site (0.9.32). $runLeg's
             # watchdog and its eval-failure branch call $finish with one argument, so a
             # timeout or a throw stays transient, which is what they are.
-            my ($res, $standing) = @_;
+            my ($res, $standing, $refused) = @_;
+            # A REFUSED leg is recorded for the answer, not as an outcome of its own: it is
+            # ERRORED like any search that was never answered. See $refusedAny.
+            $refusedAny = 1 if $refused;
 
             # RECORD WHAT THIS SERVICE DID — HERE, BEFORE THE MERGE, AND EXACTLY ONCE.
             #
@@ -3451,7 +3829,12 @@ sub _findPlayable {
                 # while the album plays. No fallback: with no service title we send no
                 # '&al=' and ListenLater reads Material's label, which is imperfect but
                 # never wrong, whereas the wrong string is silently unmatchable.
-                _attachFavUrl($it, $svc, $it->{_cover}, $artist, $it->{_svctitle}, $it->{_year});
+                # A service flagged `native_favurl` (Spotify) already ships a WORKING favurl
+                # from its own renderer, and decorating it would break it: Spotty's album()
+                # extracts the id with a greedy /album:(.*)/, which would capture the query
+                # string into the id and replay nothing.
+                _attachFavUrl($it, $svc, $it->{_cover}, $artist, $it->{_svctitle}, $it->{_year})
+                    unless $a->{native_favurl};
             }
             $result[$i] = \@matched;
             $resolve->();
@@ -3493,7 +3876,7 @@ sub _findPlayable {
             # $standing rides through to $finish untouched (0.9.31) — see its note there.
             # The retry gate below cannot fire on it: `_wantsTitleRetry` returns 0 for
             # anything that is not an ARRAY ref, and a standing failure always sends undef.
-            my ($self, $res, $standing) = @_;
+            my ($self, $res, $standing, $refused) = @_;
             return if $settled || $resolved;
             # THE RETRY NOW FIRES ON A LOOSE-ONLY RESULT, not only on an empty one (0.9.27).
             # 0.7.12 added this leg for a RECALL failure — a common-word artist ("Leo")
@@ -3523,7 +3906,7 @@ sub _findPlayable {
             }
             # $finish merges @leg1 back in — every outcome, including a leg-2 watchdog or
             # throw, has to get that fallback and only $finish sees them all.
-            $finish->($res, $standing);
+            $finish->($res, $standing, $refused);
         };
 
         $runLeg->($qChars, $qBytes, 'artist', sub { $collect->($collect, @_) });
@@ -3696,30 +4079,20 @@ sub _streamResult {
 sub _rebuildStreamItems {
     my ($cached) = @_;
 
-    my %enabled = map { $_->{name} => 1 } _orderedAdapters();
+    # Each adapter names its own reattach coderef (`rebuild`, see _detectAdapters), so this
+    # needs no per-service branch. Every service's album node has the same shape: the
+    # renderer's coderef url is stripped on cache and the native id rides `passthrough`
+    # (plain data), which the reattached browse handler resolves the tracklist from. (For
+    # Deezer the `deezer://album:<id>` string is the play/favourites value, NOT this url.)
+    my %enabled = map { $_->{name} => $_ } _orderedAdapters();
 
     my @out;
     for my $c (@{ $cached || [] }) {
         my %item = %$c;
         my $svc  = $item{_svc} // '';
-        next unless $enabled{$svc};
-
-        if ($svc eq 'Qobuz' && Plugins::Qobuz::Plugin->can('QobuzGetTracks')) {
-            $item{url} = \&Plugins::Qobuz::Plugin::QobuzGetTracks;
-        }
-        elsif ($svc eq 'Tidal' && Plugins::TIDAL::Plugin->can('getAlbum')) {
-            $item{url} = \&Plugins::TIDAL::Plugin::getAlbum;
-        }
-        elsif ($svc eq 'Deezer' && Plugins::Deezer::Plugin->can('getAlbum')) {
-            # Same shape as Tidal: `_renderAlbum` set `url => \&getAlbum` (stripped on
-            # cache) with the album id in `passthrough` (preserved), so getAlbum
-            # resolves the tracklist on read. (The `deezer://album:<id>` string is the
-            # `play`/favourites value, not this browse url.)
-            $item{url} = \&Plugins::Deezer::Plugin::getAlbum;
-        }
-        else {
-            next;
-        }
+        my $rebuild = $enabled{$svc} && $enabled{$svc}{rebuild};
+        next unless ref $rebuild eq 'CODE';
+        $item{url} = $rebuild;
 
         push @out, \%item;
     }
@@ -3856,7 +4229,7 @@ sub _resetSvcAvailability {
 }
 
 sub _svcCantAnswer {
-    my ($svc, $why, $query, $collect, $noHandler) = @_;
+    my ($svc, $why, $query, $collect, $noHandler, $refused) = @_;
     # THE CALL SITE STATES A FACT; THE CLASSIFICATION IS COMPUTED HERE (0.9.32). The fifth
     # argument used to be `$standing` — a hardcoded prediction that a missing handler will
     # still be missing next time. It is now `$noHandler`, which is simply what the adapter
@@ -3893,7 +4266,10 @@ sub _svcCantAnswer {
              . "s — treating it as signed out, not a startup race")
         if $standing && !$STANDING_WARNED{$svc}++;
 
-    return $collect->(undef, $standing);
+    # $refused: THIS search was refused by a rate-limiting service and never sent (0.9.39) —
+    # passed up so the warm's pump can hold on it even when the answer arrives synchronously.
+    # See PACED_WARM_GAP.
+    return $collect->(undef, $standing, $refused ? 1 : 0);
 }
 
 sub _dbgSearch {
@@ -4082,6 +4458,110 @@ sub _searchDeezer {
             if !@out && $rendererFailed;
         $collect->(\@out);
     }, { search => $query, type => 'album', strict => 'off', limit => 50 });
+}
+
+# When _searchSpotify last saw a search REFUSED (0.9.37) — the warm backs off for
+# SPOTIFY_BACKOFF_WINDOW after it (see _spotifyBackingOff, PACED_WARM_GAP). Our own clock,
+# deliberately not Spotty's flag: that clears only on a SUCCESSFUL Spotify response, and with
+# Spotify ranked low it can be many albums before one is sent — the warm would crawl the whole
+# time. Declared HERE, above its first use: `our` is lexically scoped. `our` so a suite can place
+# the stamp.
+use constant SPOTIFY_BACKOFF_WINDOW => 30;   # seconds; Spotify's observed Retry-After was 3-7s
+our $SPOTIFY_REFUSED_AT = 0;
+
+# Spotify: via the Spotty plugin (ported from the ListenBrainz sibling's _searchSpotify, PR
+# #17 by honzup; Spotty's API verified in that repo's docs/spotify-spotty-adapter-pr17.md).
+# ->search(cb, {query, type, limit}) — key `query`, SINGULAR type — runs through Spotty's
+# Pipeline and calls back with a bare arrayref of ALREADY-NORMALISED album hashes
+# ({name, artist, artists, id, uri, release_date, …}); the album title is `name`, not
+# `title`.
+#
+# TWO DELIBERATE DIFFERENCES FROM THE SIBLING, both because this plugin already owns the
+# problem the sibling's code solves:
+#   - No `hasCredentials` -> [] branch for a missing handler. Signed-out Spotty is
+#     PERMANENT, but that is exactly what _svcCantAnswer's grace window measures here: once
+#     standing it is OUTCOME_UNAVAILABLE, which cannot shorten another service's no-match
+#     (_streamTtl), and a no-handler call sends no request. One carrier, no Spotify branch.
+#   - No zero-raw-results-is-an-error rule. Spotty's Pipeline swallows API errors into an
+#     empty arrayref, so an outage reads as a real miss. Accepted for the NO-MATCH case:
+#     without a bounded retry schedule the rule would re-search a genuinely absent album
+#     hourly for ever. The two places that trade was NOT acceptable are handled narrowly
+#     (0.9.36, measured on the live server with Spotify at priority 1):
+#       * empty WHILE SPOTTY IS RATE-LIMITING is an error, not a verdict — below;
+#       * an empty answer ABOVE the row's winner caps that row at a day (`empty_unverified`,
+#         see _streamTtl), so a lower service's match is not pinned for thirty days on it.
+sub _searchSpotify {
+    my ($client, $query, $artistNorm, $albumNorm, $svc, $collect, $albumRaw) = @_;
+    my $t0 = Time::HiRes::time();
+
+    my $api = Plugins::Spotty::Plugin->getAPIHandler($client);
+    unless ($api) { return _svcCantAnswer($svc, 'no API handler (signed out?)', $query, $collect, 1) }
+    _svcHasHandler($svc);   # it is signed in — close any grace window we were timing
+
+    $api->search(sub {
+        my $albums = shift;
+        # Defensive only: this Pipeline always sends an arrayref, even on error.
+        return _svcCantAnswer($svc, 'search errored', $query, $collect)
+            unless defined $albums && ref $albums eq 'ARRAY';
+        # EMPTY WHILE SPOTTY IS RATE-LIMITING IS NOT A VERDICT (0.9.36). After a 429 Spotty
+        # refuses every call for Retry-After without sending a request or logging a line, and
+        # each refusal reaches us as the same `[]` as a genuine zero-hit. `hasError429` is the one
+        # signal its API exposes: set by the 429, cleared by the next SUCCESSFUL response — and a
+        # real empty answer is a successful response, which clears it before this callback runs.
+        # Only an EMPTY list is doubted; a list with albums in it is an answer whatever the flag.
+        if (!@$albums && _spottyRateLimited()) {
+            $SPOTIFY_REFUSED_AT = time();   # and the warm backs off — see PACED_WARM_GAP
+            return _svcCantAnswer($svc, 'empty answer while Spotify is rate-limiting (429)', $query, $collect, 0, 1);
+        }
+        my @out;
+        my $rendererFailed = 0;
+        my ($idx, $firstAt) = (0, undef);
+        for my $album (@$albums) {
+            $idx++;
+            next unless ref $album eq 'HASH';
+            my $candArtist = (defined $album->{artist} && !ref $album->{artist})
+                ? $album->{artist}
+                : (ref $album->{artists} eq 'ARRAY' && ref $album->{artists}[0] eq 'HASH')
+                    ? $album->{artists}[0]{name} : '';
+            next unless _albumMatches($artistNorm, $albumNorm, $candArtist, $album->{name}, $albumRaw);
+            my $item = eval { Plugins::Spotty::OPML::_albumItem($client, $album) };
+            if ($@ || ref $item ne 'HASH') {
+                $log->warn("Spotify _albumItem failed: $@") if $@;
+                $rendererFailed = 1;
+                next;
+            }
+            # Native id, for parity with the other adapters — the bare id field, else parsed
+            # from the spotify:album:<id> uri. NOT turned into a decorated favurl: the adapter
+            # is `native_favurl`, so Spotty's own favorites_url is kept (see the settle loop).
+            my $sid = $album->{id};
+            ($sid) = ($album->{uri} // '') =~ /album:([A-Za-z0-9]+)$/ unless defined $sid && length $sid;
+            $item->{_albumid}  = $sid;
+            # The SERVICE's own title (`name` on Spotify) and release year — see _searchQobuz.
+            $item->{_svctitle} = _stripArtistAffix($album->{name}, $candArtist);
+            $item->{_year}     = _svcYear($album);
+            $firstAt //= $idx;
+            push @out, $item;
+        }
+        _dbgSearch('Spotify', 'albums', $query, $t0, scalar(@$albums), scalar(@out), $firstAt);
+        return _svcCantAnswer($svc, 'every candidate failed to render', $query, $collect)
+            if !@out && $rendererFailed;
+        $collect->(\@out);
+    }, { query => $query, type => 'album', limit => 50 });
+}
+
+# Spotty probe, guarded on `can` and eval so an older or reshaped Spotty reads as "no signal"
+# rather than taking a resolve down. `hasError429`: the last Spotify response was a 429 and
+# nothing has succeeded since.
+sub _spottyRateLimited {
+    my $f = Plugins::Spotty::API->can('hasError429') or return 0;
+    return eval { $f->('Plugins::Spotty::API') } ? 1 : 0;
+}
+
+# The Spotify adapter's `pace_warm`: true for SPOTIFY_BACKOFF_WINDOW after _searchSpotify last
+# saw a search REFUSED (the stamp and the window are declared above _searchSpotify, which
+# writes it).
+sub _spotifyBackingOff {
+    return (time() - ($SPOTIFY_REFUSED_AT || 0)) < SPOTIFY_BACKOFF_WINDOW ? 1 : 0;
 }
 
 # ===========================================================================

@@ -390,9 +390,9 @@ print "--- Browse rendering: only year rows differ ---\n";
     my $rrow = $BR_NS->can('_reviewRow')->(undef, $rev);
     is('a REVIEW row is unprefixed', $rrow->{name}, 'Dijon - Baby');
 
-    is('year row line2 leads with the year', $BR_NS->can('_line2')->($yr),  '2025 - Short capsule.');
+    is('year row line2 leads with the year', $BR_NS->can('_line2')->(undef, $yr),  '2025 - Short capsule.');
     ok('review row line2 still leads with the date',
-       $BR_NS->can('_line2')->($rev) =~ /^2 December 2025 \x{b7} Pop - /);
+       $BR_NS->can('_line2')->(undef, $rev) =~ /^2 December 2025 \x{b7} Pop - /);
 
     is('year row link says "list"',    $BR_NS->can('_linkLabel')->($yr),  'PLUGIN_PITCHFORKREVIEWS_READ_LIST');
     is('review row link says "review"', $BR_NS->can('_linkLabel')->($rev), 'PLUGIN_PITCHFORKREVIEWS_READ_REVIEW');

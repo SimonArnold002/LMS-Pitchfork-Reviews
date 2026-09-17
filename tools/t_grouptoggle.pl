@@ -127,13 +127,65 @@ for my $mode ('genre', 'date') {
        0 == grep { ($_->{type} // '') ne 'text' } @div);
 }
 
+print "--- the score mode is a DIFFERENT shape, and the dispatch is total ---\n";
+{
+    my $sc = $NS->can('_groupedRows')->(undef, \@ITEMS, 1, 'score', 'reviews');
+    my @div  = dividers($sc);
+    my @revs = grep { exists $_->{line1} } @$sc;
+
+    is('every review row survives the flat view', scalar(@revs), 4);
+    is('exactly ONE header, not a divider per bucket', scalar(@div), 1);
+    ok('...and it leads the list', !exists $sc->[0]{line1});
+    ok('the header names the section and counts the rows',
+       ($sc->[0]{name} // '') =~ /\(4\)$/);
+
+    # THE DISPATCH IS TOTAL. Before 0.9.42 _groupedRows read "genre, else weekly", so a
+    # mode it did not know rendered WEEKS — and 'score' is reachable straight from the
+    # pref. Compare against the week view's own output: if the score branch is dropped,
+    # these two become identical and this assertion is the one that says so.
+    my $wk = $NS->can('_groupedRows')->(undef, \@ITEMS, 1, 'date');
+    ok('score does NOT fall through to the weekly grouping',
+       join('|', map { $_->{name} // '' } @$sc) ne join('|', map { $_->{name} // '' } @$wk));
+    ok('...and emits no week dividers at all',
+       0 == grep { ($_->{name} // '') =~ /^Week of/ } @$sc);
+
+    # An unrecognised mode must still land on genre — the same value _groupBy falls
+    # back to — rather than on whichever branch happens to be last.
+    my $bogus = $NS->can('_groupedRows')->(undef, \@ITEMS, 1, 'nonsense');
+    my $genre = $NS->can('_groupedRows')->(undef, \@ITEMS, 1, 'genre');
+    is('an unknown mode renders as genre',
+       join('|', map { $_->{name} // '' } @$bogus),
+       join('|', map { $_->{name} // '' } @$genre));
+}
+
 print "--- the toggle row ---\n";
 {
     my $t = $NS->can('_groupToggle')->(undef, 'genre');
     is('refreshes the view in place', $t->{nextWindow}, 'refresh');
     ok('carries the sort glyph', ($t->{image} // '') =~ /_MTL_icon_sort\.png$/);
+
+    # THE ROW TEXT COMES FROM A TOKEN, NOT A LITERAL. This harness's cstring stub returns
+    # the token, so a correct build yields the token here — and a hardcoded English
+    # "View: %s (tap to change)" would render perfectly in EN while silently losing the
+    # NL translation the plugin ships. That is invisible to every other assertion.
+    is('the row text is a string token', $t->{name}, 'PLUGIN_PITCHFORKREVIEWS_VIEW_BY');
+
+    # ...and the token has to actually BE in strings.txt: a cstring for a missing token
+    # does not fail, LMS renders the raw token to the user.
+    my $st = do { local (@ARGV, $/) = ('PitchforkReviews/strings.txt'); <> } // '';
+    for my $tok (qw(PLUGIN_PITCHFORKREVIEWS_VIEW_BY PLUGIN_PITCHFORKREVIEWS_VIEW_SCORE)) {
+        ok("strings.txt declares $tok with EN and NL",
+           $st =~ /^\Q$tok\E\n\tEN\t[^\n]*\n\tNL\t\S/m);
+    }
+    ok('the retired GROUPED_BY token is gone from strings.txt',
+       $st !~ /^PLUGIN_PITCHFORKREVIEWS_GROUPED_BY$/m);
     is('genre label',  $NS->can('_groupLabel')->(undef, 'genre'), 'PLUGIN_PITCHFORKREVIEWS_GROUP_BY_GENRE');
     is('week label',   $NS->can('_groupLabel')->(undef, 'date'),  'PLUGIN_PITCHFORKREVIEWS_GROUP_WEEK');
+    is('score label',  $NS->can('_groupLabel')->(undef, 'score'), 'PLUGIN_PITCHFORKREVIEWS_VIEW_SCORE');
+    # An unknown mode must land on the SAME value _groupBy falls back to, or the row
+    # names one layout while the renderer draws another.
+    is('an unknown mode labels as genre', $NS->can('_groupLabel')->(undef, 'nonsense'),
+       'PLUGIN_PITCHFORKREVIEWS_GROUP_BY_GENRE');
 
     my %stored;
     no warnings 'redefine', 'once';
@@ -141,12 +193,19 @@ print "--- the toggle row ---\n";
     local *T::Prefs::set = sub { $stored{$_[1]} = $_[2] };
 
     # Trap 2: advance from the LIVE pref. The row was built showing 'genre'; if the
-    # pref has since moved to 'date', tapping must go to 'genre', not back to 'date'.
+    # pref has since moved to 'date', tapping must go on to 'score', not back to 'date'.
     $stored{group_by} = 'date';
     $t->{url}->(undef, sub {});
-    is('advances from the LIVE pref, not the captured render', $stored{group_by}, 'genre');
-    $t->{url}->(undef, sub {});
-    is('and round-trips back', $stored{group_by}, 'date');
+    is('advances from the LIVE pref, not the captured render', $stored{group_by}, 'score');
+
+    # THE FULL CYCLE, asserted as a ring rather than as one step (0.9.42). A third mode
+    # is exactly where an off-by-one in the wrap hides: with two modes ANY rotation is
+    # the identity every other tap, so the old two-step check could not have caught a
+    # reversed or skipping cycle. Genre -> Week -> Score -> Genre.
+    $stored{group_by} = 'genre';
+    my @seen;
+    for (1 .. 4) { $t->{url}->(undef, sub {}); push @seen, $stored{group_by}; }
+    is('the cycle is genre -> date -> score -> genre', join(',', @seen), 'date,score,genre,date');
 
     # Trap 3: the enum guard moved from the Settings save to the read.
     $stored{group_by} = 'nonsense';

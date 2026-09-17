@@ -108,9 +108,18 @@ $prefs->init({
     svc_priority_qobuz  => 1,
     svc_priority_tidal  => 2,
     svc_priority_deezer => 3,
+    # Spotify (via Spotty) last: it only competes once the others have missed, and its
+    # Pipeline cannot tell a failed search from an empty one.
+    svc_priority_spotify => 4,
 
-    # Latest Reviews grouping: 'date' (weekly dividers) or 'genre'. Default 'genre'
-    # for now so a fresh install shows the genre grouping without a settings visit.
+    # How the three review sections are laid out: 'genre' (genre dividers), 'date'
+    # (weekly dividers) or 'score' (ONE FLAT LIST, highest score first — no dividers).
+    # Default 'genre' so a fresh install shows the genre grouping without a settings visit.
+    #
+    # THE PREF NAME IS HISTORICAL. It predates 'score', which is a SORT and not a grouping,
+    # so the name under-describes it now. Kept anyway: renaming would orphan every user's
+    # stored choice, and the browse code reads it through _groupBy() in one place. The row
+    # the user actually taps says "View: …" for the same reason — see Browse::_groupToggle.
     group_by => 'genre',
 
     # Best Albums of the Year ordering: 'rank' (#1 at the top — the browse-list

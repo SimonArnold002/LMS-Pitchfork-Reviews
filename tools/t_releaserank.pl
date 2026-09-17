@@ -112,6 +112,7 @@ sub adapters_returning {
         push @a, {
             name => $name, icon => "icon-$name", priority => ($cfg->{priority} || 1),
             query_enc => 'bytes',
+            %{ $cfg->{extra} || {} },   # table fields a scenario needs (e.g. empty_unverified)
             run  => sub {
                 my ($client, $query, $an, $bn, $svc, $collect) = @_;
                 push @QUERIES, { svc => $svc, query => $query };
@@ -935,6 +936,131 @@ print "\n4. release alts — editions collapse, releases do not\n";
     my ($alt) = $alts->($prim, $res->($prim, cand($SINGLE)));
     ok('the cached node is not tagged in place', !exists $prim->{_altkind});
     ok('the alt is a distinct hashref', $alt != $prim);
+}
+
+# =============================================================================
+print "\n# 3h. an `empty_unverified` service's empty answer ABOVE the winner holds the row a day (0.9.36)\n";
+# =============================================================================
+# Driven through the REAL _findPlayable: a _streamTtl that honours the flag is worth nothing if
+# $resolve never hands it over, and that call site is exactly what a unit test of _streamTtl
+# cannot see. Field case: Spotify at priority 1 on a rate-limited quota answered `[]` to 184
+# searches, Qobuz matched below it, and the rows were pinned to Qobuz for thirty days.
+{
+    reset_svc();
+    my $FOUND   = $B->can('STREAM_FOUND_TTL')->();
+    my $UNVAL   = $B->can('STREAM_UNVALIDATED_TTL')->();
+    my $NOMATCH = $B->can('STREAM_NOMATCH_TTL')->();
+
+    resolve('Interpol', $ALBUM,
+        Aspot  => { priority => 1, script => [ [], [] ], extra => { empty_unverified => 1 } },
+        Bqobuz => { priority => 2, script => [ [ cand($ALBUM) ] ] });
+    is('flagged top service empty, the next one matched -> a day, not thirty', ttl_written(), $UNVAL);
+    is('...and the row is still the match that was found', (cached_titles())[0], $ALBUM);
+
+    resolve('Interpol', $ALBUM,
+        Aspot  => { priority => 1, script => [ [], [] ] },
+        Bqobuz => { priority => 2, script => [ [ cand($ALBUM) ] ] });
+    is('CONTROL: the same run without the flag keeps thirty days', ttl_written(), $FOUND);
+
+    resolve('Interpol', $ALBUM,
+        Aspot  => { priority => 1, script => ['ERRORED'], extra => { empty_unverified => 1 } },
+        Bqobuz => { priority => 2, script => [ [ cand($ALBUM) ] ] });
+    is('flagged top service ERRORED (a 429 lands here) -> a day', ttl_written(), $UNVAL);
+
+    resolve('Interpol', $ALBUM,
+        Aqobuz => { priority => 1, script => [ [ cand($ALBUM) ] ] },
+        Bspot  => { priority => 2, script => [ [], [] ], extra => { empty_unverified => 1 } });
+    is('a flagged service BELOW the winner changes nothing', ttl_written(), $FOUND);
+
+    resolve('Interpol', $ALBUM,
+        Aspot  => { priority => 1, script => [ [], [] ], extra => { empty_unverified => 1 } },
+        Bqobuz => { priority => 2, script => [ [], [] ] });
+    is('no winner: a confirmed no-match is untouched (ledger B)', ttl_written(), $NOMATCH);
+}
+
+# =============================================================================
+print "\n# 3i. a \"Title: Subtitle\" review retries on the title before the colon — exact, dated, guarded (0.9.38)\n";
+# =============================================================================
+# Driven through the REAL _findPlayableReview / _findPlayable. Each guard is pinned by the real
+# catalogue shape that motivated it (audit 2026-09-15): Badu fixed, Turnstile's different 2025
+# record refused, a prefix sibling refused, a yearless match refused, year-list slack allowed.
+sub ycand {
+    my ($t, $y) = @_;
+    return { name => "Erykah Badu - $t", _svctitle => $t, image => 'c.jpg', (defined $y ? (_year => $y) : ()) };
+}
+{
+    reset_svc();
+    my $ARTIST = 'Erykah Badu / The Alchemist';
+    my $BADU   = 'Before the World Blows: The Abi and Alan Experiment';
+    my $SHORT  = 'Before The World Blows';
+    my $real   = $B->can('_realMatches');
+    my $review = sub {
+        my ($album, $minYear, %svc) = @_;
+        @QUERIES = (); @WROTE = (); @ADAPTERS = adapters_returning(%svc);
+        @Slim::Utils::Timers::armed = ();
+        my $got;
+        $B->can('_findPlayableReview')->(undef, sub { $got = $_[0] }, $ARTIST, $album, undef, $minYear);
+        return $got;
+    };
+
+    # Script per resolve: full title leg 1 + its title leg 2, then the pre-colon resolve's legs.
+    my $r = $review->($BADU, 2026, Spot => { script => [ [], [], [ ycand($SHORT, 2026) ] ] });
+    is('Badu: full title missed, the title before the colon matched -> the row plays it', (titles($r))[0], $SHORT);
+    is('...the full title was searched FIRST (artist, then its own title), then a second resolve',
+       join('|', queries()), "$ARTIST|$BADU|$ARTIST");
+
+    $r = $review->($BADU, 2026, Spot => { script => [ [ ycand($BADU, 2026) ] ] });
+    is('a subtitled title that ALREADY matches is untouched', (titles($r))[0], $BADU);
+    is('...and costs no second resolve', scalar(queries()), 1);
+
+    $r = $review->('NEVER ENOUGH: VERSIONS', 2026, Spot => { script => [ [], [], [ ycand('NEVER ENOUGH', 2025) ] ] });
+    is('Turnstile trap: an exact pre-colon title from BEFORE the review year is another record -> no match',
+       scalar($real->($r)), 0);
+
+    $r = $review->($BADU, 2026, Spot => { script => [ [], [], [ ycand("$SHORT: Porches Version", 2026) ], [] ] });
+    is('a PREFIX sibling of the pre-colon title is refused (exact only)', scalar($real->($r)), 0);
+
+    $r = $review->($BADU, 2026, Spot => { script => [ [], [], [ ycand($SHORT) ] ] });
+    is('a pre-colon match stating NO year is refused (no evidence it is this record)', scalar($real->($r)), 0);
+
+    $r = $review->($BADU, 2026, Spot => { script => [ [], [], [ ycand("$SHORT (Deluxe Edition)", 2026) ] ] });
+    is('an edition bracket is still exact (_norm strips it)', scalar($real->($r)), 1);
+
+    $r = $review->($BADU, 2020, Spot => { script => [ [], [], [ ycand($SHORT, 2020) ] ] });
+    is('a year-end list\'s one year of slack admits the previous year', scalar($real->($r)), 1);
+
+    $r = $review->($BADU, undef, Spot => { script => [ [], [], [ ycand($SHORT, 2026) ] ] });
+    is('no known year for the row -> no retry at all', scalar($real->($r)), 0);
+    is('...and no second resolve', scalar(queries()), 2);
+
+    my $base = $B->can('_subtitleBase');
+    is('base: the text before the first ": "', $base->($BADU, $ARTIST), 'Before the World Blows');
+    is('base: Dawn Richard', $base->('Second Line: An Electro Revival', 'Dawn Richard'), 'Second Line');
+    ok('base: a title that also has a slash is left to the combined-review path',
+       !defined $base->("Song of Sage: Post Panic! / Navy's Reprise", 'Navy Blue'));
+    ok('base: a colon with no following space (4:44) is not a subtitle', !defined $base->('4:44', 'JAY-Z'));
+    ok('base: pre-colon text that IS the artist is refused', !defined $base->('Adele: Live at the Albert Hall', 'Adele'));
+    ok('base: a one-character pre-colon title is refused', !defined $base->('X: Something Else', 'Band'));
+
+    my $min = $B->can('_subtitleMinYear');
+    is('min year: a review uses its own year', $min->({ date => '2026-09-04T04:03:00.000Z' }), 2026);
+    is('min year: a year-end entry allows the previous year', $min->({ year => 2021, rank => 3, date => '2021-12-07T14:00:00.000Z' }), 2020);
+    ok('min year: nothing known -> undef', !defined $min->({ artist => 'A' }));
+
+    # WIRING — a guarded retry is worth nothing if the callers never hand it a year.
+    my @args;
+    {
+        no warnings 'redefine';
+        local *Plugins::PitchforkReviews::Browse::_findPlayableReview = sub { push @args, [ @_ ] };
+        $B->can('_resolveSection')->(undef, [ { artist => 'A', album => 'T: Sub', date => '2026-09-04T04:03:00.000Z' } ],
+            sub {}, 10, 'view');
+        my $yr = { artist => 'A', album => 'T: Sub', year => 2021, rank => 4 };
+        $B->can('_refreshMatchRow')->(undef, $yr)->{url}->(undef, sub {}, {}, $yr);
+    }
+    is('the resolve pump passes the review\'s year', ($args[0] || [])->[5], 2026);
+    is('the Refresh row passes a year-end entry\'s year minus one', ($args[1] || [])->[5], 2020);
+    is('...and still forces', ($args[1] || [])->[4], 1);
+    ($args[0][1] || sub {})->({ items => [] });   # release the view's in-flight count
 }
 
 printf "\n%d passed, %d failed\n", $p, $f;

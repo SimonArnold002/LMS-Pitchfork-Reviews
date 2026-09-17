@@ -29,7 +29,104 @@ while the rounds ran.*
 them only if you have genuinely NEW information — a case the recorded reasoning
 does not cover. Say which ledger entry you are challenging and what changed.
 
+### DECLINED / SETTLED INDEX — GREP THIS FIRST
+
+**One grep before reporting any finding.** Search this table for the symbol or subject the
+finding is about, then grep the phrase in the last column to jump to the entry. A hit means it
+is already decided: read the entry and either drop the finding, or answer its stated reason
+with new evidence. Do not re-report it as new. Phrases are used instead of line numbers
+because line numbers rot on the next edit.
+
+| already decided | § | find it with |
+|---|---|---|
+| THE FLEET FOLD ROLLOUT IS CLOSED — 2026-09-10. NO WORK IS OUTSTANDING IN THIS REPO | A2 | `THE FLEET FOLD ROLLOUT IS CLOSED —` |
+| The zip is not rebuilt and `repo.xml <sha>` is not recomputed in the working | A2 | `The zip is not rebuilt and `repo.xml <sha>`` |
+| `CHANGELOG.md` and `README` are written at the MERGE TO MAIN, not on dev | A2 | ``CHANGELOG.md` and `README` are written at` |
+| A large uncommitted working tree, where present, is deliberate | A2 | `A large uncommitted working tree, where` |
+| PFR's matcher copies follow the fleet rule | A2 | `PFR's matcher copies follow the fleet rule` |
+| Genre/rank grouping is deliberately NOT run through `_groupedRows` | A2 | `Genre/rank grouping is deliberately NOT run` |
+| Tuning values are not defects | A2 | `Tuning values are not defects` |
+| `native_favurl`, `_attachFavUrl` skipped for Spotify, a row with no `&al=`/`&a=`/`?cover=`/`&y=`, `_svctitle` discarded — the skip is settled; its COST (the LL title) is fixed IN LL for Played (release-id door, LL 1.0.3 dev, installed and tested; playback test deferred, classed OK) — nothing owed by PFR | A2 | `native_favurl` SKIPPING `_attachFavUrl` IS CORRECT` |
+| empty/missing artist, `''` artist default, `_artistMatch` with one side empty, artist-less release | A2 | `AN ARTIST-LESS RELEASE IS NOT CATERED FOR` |
+| The rank / `Artist - ` prefix on a row label vs ListenLater — true for four services, NEVER for Spotify; Played no longer depends on it (LL §B id door) — LL now also shows the matched Spotify album's name — no PFR change | — | `TRUE FOR FOUR SERVICES, NEVER FOR` |
+| A stale `%UNAVAIL_SINCE` record is NOT a defect — "Refresh streaming match" clears it | B | `A stale `%UNAVAIL_SINCE` record is NOT a` |
+| The grace window's blast radius is BOUNDED by `_streamTtl`'s all-unavailable branch | B | `The grace window's blast radius is BOUNDED by` |
+| `matcher_sync_check.py` exits 1 fleet-wide, and PFR is now on the AHEAD side | B | ``matcher_sync_check.py` exits 1 fleet-wide,` |
+| PFR will NOT get LBF's `_candReleaseType` single-drop filter (declined 0.9.27) | B | `PFR will NOT get LBF's `_candReleaseType`` |
+| The Refresh row is NOT defeated by a captured closure (withdrawn 0.9.28) | B | `The Refresh row is NOT defeated by a captured` |
+| `_wantsTitleRetry` will NOT be widened with `_matchExactness` (declined 0.9.29) | B | ``_wantsTitleRetry` will NOT be widened with` |
+| The Qobuz search payload's `release_type` availability is UNVERIFIED | B | `The Qobuz search payload's `release_type`` |
+| `_searchSpotify`: an errored Spotty search reads as a real miss (no zero-raw-results rule) | B | `_searchSpotify` TREATS AN EMPTY SPOTTY ANSWER` |
+| `_searchSpotify`: no `hasCredentials` branch; account stays keyed per service | B | `_searchSpotify` HAS NO `hasCredentials` BRANCH` |
+| `pace_warm`: warm backs off only while Spotify refuses (429); always-on pacing REJECTED as too slow | B | `PACED_WARM_GAP` / `pace_warm`: THE WARM RUNS AT FULL WIDTH` |
+| `_refused` / `$holding` / `$gapTimer`: a synchronous Spotify refusal holds the warm; one re-armed wakeup — FIXED 0.9.39 (a fix record, not a suppression) | C | `SYNCHRONOUS SPOTIFY REFUSAL AND ONE` |
+| The review score sits on `line2` BY DESIGN and must not move to `line1`/`name` (the LL label door); a year row would show a score if one existed, and nothing writes one | — | `IT IS ON `line2`, AND IT MUST NEVER MOVE` |
+| THE REVIEW-SCORE FEATURE (0.9.40–0.9.42) IS CLOSED — no follow-up work; bugs go through a normal review | — | `FEATURE CLOSED 2026-09-16 (Simon): "close this` |
+| `View: Score` needs no `_frozenOrder` (the score is fixed at parse, nothing warms it); PFR has no `index`/`quantity` mapping, so the rendered-rows drift class cannot arise; the `group_by` pref name is historical, kept to preserve stored choices | — | ``_frozenOrder` WAS CONSIDERED AND IS NOT NEEDED` |
+
+**Two standing rules that kill most repeat findings:**
+
+1. **Name the WRITER, not just the branch.** A hand-built input proves the branch, never the
+   population. If nothing upstream can reach a guarded branch, say so in the finding instead
+   of reporting it as live.
+2. **A comment is not the contract.** Where a comment claims an invariant the code does not
+   enforce, the comment is the defect. Fix the prose and pin the behaviour in a suite.
+
+### HOW TO LOG A VERDICT so the next round finds it
+
+Every new decision goes in §A2 (declined), §B (accepted/open) or §C (closed) as a bullet whose
+FIRST LINE names the **symbols** a future review would grep for, then the verdict, then the
+date and who decided. Add a row to the index above in the same edit. State the reason as a
+fact that can be DISPROVEN ("no service returns X"), never as "unlikely" — a rarity claim
+invites the next round to find one counter-example and reopen the whole entry.
+
+**CLOSING A ROUND IS NOT A SUPPRESSION** (Simon, 2026-09-14). A §C entry records that a defect,
+as described, was fixed. Never head it "Do not re-report" — that wording is for a DECISION Simon
+asked for (declined, by design, a stated residual, null behaviour that keeps being mis-reported),
+always with its reason, and those stay suppressed. The code a fix added is new and open to review.
+
 ### A. NOT FINDINGS — deliberate, fleet-wide
+
+- **THE FLEET FOLD ROLLOUT IS CLOSED — 2026-09-10. NO WORK IS OUTSTANDING IN THIS REPO.**
+  Listen to Later 0.1.143 fixed a fold that ERASED non-Latin names, and the obvious next step
+  looked like porting it here. **It was not.** THIS REPO WAS ALREADY CORRECT — measured by
+  extracting the shipped `_norm` and running it: 米津玄師, 아이유 and Кино all survive, and two
+  different CJK artists correctly fail to match. LL was the only repo with the defect, and the
+  fix brought LL UP to this repo rather than the reverse. The plan and every measurement behind
+  it are in LL's `docs/fleet-fold-rollout.md`, now a RECORD rather than a work order.
+  - **`_asciiNorm`'s `s/[^a-z0-9]+/ /g` is NOT that bug and must not be "fixed".** Being
+    ASCII-only is its job. The real `_norm` uses `\p{Alnum}` on a DECODED string. A grep for
+    the old pattern hits `_asciiNorm` in every repo and produced exactly this false finding
+    once already.
+  - **LL's matcher came INTO line at 0.1.145 and the old divergence note here is withdrawn.**
+    It took the stylised-letter fold (`P!nk` → `pink`) and `_punctNorm` verbatim, so nothing is
+    behind any more. Two differences remain and BOTH are deliberate: LL keeps an all-marks
+    fallback this repo does not have (see the next bullet, where LL is the better one), and
+    LL's dedupe KEY carries none of these rules at all, which is a DECLINED scope decision in
+    that repo and not a gap. **Do not report either, in either direction, as drift.**
+  - **The `†††` residue is DECLINED, not open — 2026-09-10, and the reason is MEASURED rather
+    than "nobody has complained".** An all-symbol name with no fold mapping (`†††`, Crosses)
+    normalises to `''` here, because `!!!` and `+/-` survive only through their leetspeak
+    mappings. Porting LL's all-marks fallback into `_norm` was prototyped against shipped code:
+    on the normaliser it is a clean split — 67 names byte-identical, 10 rescued from empty, 0
+    moved, suites green — **but through `_albumMatches` it flips four cases and only one flip
+    is wanted.** It moves an all-marks artist OUT of the lenient empty-artist branch and INTO
+    the strict artist gate, so a release MusicBrainz credits to `†††` that Qobuz spells
+    "Crosses" goes MATCH → **reject**. The port makes matching WORSE here.
+  - **"LL has the fallback, so this repo should" IS NOT EVIDENCE — the gates run opposite
+    ways, and an earlier draft of this very entry made that mistake.** LL's `_artistMatch`
+    returns 1 when either side is empty, so an erased name there is a total free pass and the
+    fallback can only tighten it. This repo's returns 0, and its empty-artist branch already
+    demands an exact title. LL also replays a SAVED item back to the same source, so both
+    spellings agree by construction, where this plugin exists to match a MusicBrainz or
+    Pitchfork credit against a differently-spelled service catalogue. Same code, opposite effect.
+  - **Do not generalise "a MISS, not a wrong answer" either.** It holds for the ALBUM path,
+    which is all this repo has. It was measured FALSE on LBF's TRACK path, where the refusal
+    answered `undef`, read as INCONCLUSIVE, and burned a retry schedule without a single
+    request. LBF fixed that with `_punctNorm` in single-copy subs — **no fleet obligation, and
+    nothing to port here**, since this repo has no `_trackMatches` at all.
+  - **Re-raise ONLY with a real artist that actually failed**, naming it — not with the `†††`
+    example, which is this entry.
 
 - **The zip is not rebuilt and `repo.xml <sha>` is not recomputed in the working
   tree.** Both happen at build time, together with the version bump. `install.xml`
@@ -49,6 +146,45 @@ does not cover. Say which ledger entry you are challenging and what changed.
   contexts noted below — both grouping modes are meaningless there.
 - **Tuning values are not defects.** Where a fix note says a threshold was
   "deliberately NOT retuned", that is a tuning call and out of scope.
+- **`native_favurl` SKIPPING `_attachFavUrl` IS CORRECT AND IS NOT A PFR FINDING — SETTLED
+  2026-09-16 (Simon). Do not re-report it, and do not offer decorating the favurl as the fix
+  for anything.** A Spotify-matched row ships Spotty's own bare `spotify:album:<id>` and
+  therefore carries no `?cover=`, `&a=`, `&al=` or `&y=`. That is deliberate at BOTH senders:
+  Spotty's `API::album` reads `my ($id) = $args->{uri} =~ /album:(.*)/;` (verified at source
+  2026-09-16) — greedy to end of string, so anything appended is swallowed into the id and
+  Spotty's OWN replay of that string returns an empty tracklist. **Precisely what that
+  protects:** the row's `favorites_url` is the string LMS Favourites saves and hands back to
+  Spotty. ListenLater itself would cope — it captures the id with `[A-Za-z0-9._-]+`, which
+  stops at `?`, and rebuilds a clean URI for replay — so the constraint is Favourites, not LL.
+  LBF exempts Spotify in its own `_attachFavUrl` for the identical reason.
+  **What the skip COSTS was fixed on the LL side, with NO PFR change** — see LL `CLAUDE.md` §B,
+  `A SPOTIFY ROW'S STORED ALBUM TITLE CAN NEVER MATCH`. Measured 2026-09-16: LL recovers the artist
+  and year from Spotty by itself (4/4), but stores this row's LABEL as the album title, which
+  Played could never match. A first, title-based fix was **reverted unapplied**. The fix in LL's
+  1.0.3 dev build (2026-09-16, installed and tested; live playback test deferred and classed OK
+  until a user reports otherwise) makes Played match a
+  Spotify play by RELEASE ID from Spotty's track cache, so the title no longer matters to Played.
+  The same measurements showed natively-added Spotty albums had the problem too, which is why
+  the fix belongs in LL, not in any sender. The LL row's DISPLAY title is fixed in LL as well (Simon:
+  "it should show what its matched to"): LL replaces a label title with the Spotify album's own
+  name, so the row shows the album PFR matched to. That fix is also in LL only. The skip stays, and none of
+  this is re-reported here as new. Two corollaries a review keeps re-deriving: `_svctitle` is still
+  computed for Spotify and then discarded — that is the field having no carrier on this one
+  path, not a leak to tidy (note it is the RAW service name, which for Spotify is not what
+  playback reports — see the LL item before reaching for it); and the row label keeps its
+  `"Artist - Album"` (and rank) shape — that is a UI decision with history, not re-argued here.
+- **AN ARTIST-LESS RELEASE IS NOT CATERED FOR, AND ITS ABSENCE IS NEVER A PFR FINDING —
+  DECIDED FLEET-WIDE 2026-09-16 (Simon), and DECLINED ×4 in LL (`AN ARTIST-LESS MUSIC ROW`).**
+  A missing or empty artist — the `''` shape default in the match subs, a row reaching
+  ListenLater with no `&a=`, an `_artistMatch` compare where one side is empty — is out of
+  scope. Do not report it, do not add a guard for it, and do not cite it as the consequence of
+  some other finding. **Every release has an artist upstream**, compilations included: Simon,
+  *"That would be classifed as Various Artists or sometimes it would be under the person who
+  curated it in a service."* A row that reaches us artist-less is a local gap in that one row,
+  never a population — so **a single artist-less row found in a list is not evidence and does
+  not reopen this** (I tried exactly that on 2026-09-16 with a label comp and was corrected).
+  Where such a row does turn up, the intended behaviour is to **match by album title alone**,
+  which the fleet matcher's pinned leniency already does. Nothing is owed.
 
 ### B. KNOWN-OPEN AND ACCEPTED — do not re-report as new
 
@@ -124,12 +260,84 @@ does not cover. Say which ledger entry you are challenging and what changed.
   probed from a dev Mac. Deezer (`record_type`, live-verified) and Tidal (`type`, from
   `API/Async.pm` passing search items through untouched) do carry one. Nothing in the
   plugin depends on this today; it would need a one-off `_dbgv` key dump first.
+- **`_searchSpotify` TREATS AN EMPTY SPOTTY ANSWER AS A REAL MISS — deliberate (Spotify adapter,
+  2026-09-15).** Spotty's Pipeline swallows API errors into an empty arrayref (verified in the
+  ListenBrainz repo's `docs/spotify-spotty-adapter-pr17.md`), so an outage is indistinguishable from
+  a clean zero-hit. LBF's `_emptyResultIsError` is NOT ported: it rests on a bounded retry
+  schedule (`MISS_RETRY_SCHEDULE`) that PFR does not have, so here it would re-search a genuinely
+  absent album every `STREAM_INCONCLUSIVE_TTL` for ever. The cost of accepting it: an outage can
+  hold a Spotify-only album as a 24h no-match, and only when every higher-priority service missed
+  (Spotify defaults to priority 4, last). Re-raise only with a bounded retry schedule in hand.
+  **AMENDED 0.9.36 — the NO-MATCH half stands; two narrower cases were wrong and are fixed.** The
+  priced cost above assumed Spotify ranks last. Ranked FIRST on Spotty's shared default Client ID,
+  the live server showed the real cost: a swallowed error let a LOWER service's match win and be
+  pinned at `STREAM_FOUND_TTL` — 30 days — and 184 startup 502s plus year-backfill 429s did exactly
+  that (17 rows on Qobuz). So: (1) an `empty_unverified` adapter (Spotify) whose empty or errored
+  answer sits ABOVE the winner caps that row at `STREAM_UNVALIDATED_TTL`, in `_streamTtl`; (2) an
+  EMPTY Spotty answer while `Plugins::Spotty::API::hasError429` is set is `_svcCantAnswer` ERRORED,
+  not a verdict. A Spotify-only no-match is still a 24h confirmed miss, as decided above.
+- **`_searchSpotify` HAS NO `hasCredentials` BRANCH, AND THE ACCOUNT STAYS KEYED PER SERVICE —
+  deliberate.** LBF answers a signed-out Spotty with `[]` because signed-out is PERMANENT; here that
+  is exactly what `_svcCantAnswer`'s grace window measures, and a standing-UNAVAILABLE service
+  cannot shorten another service's no-match (`_streamTtl`). One carrier, no Spotify branch — see
+  section C, 0.9.32. Spotty supports per-player accounts, but `AccountHelper::getAccount` falls back
+  to any configured account, so the section-C "keyed by SERVICE ALONE" rule holds; a user running
+  different Spotify accounts per player could see a regional catalogue difference. Accepted.
+- **`PACED_WARM_GAP` / `pace_warm`: THE WARM RUNS AT FULL WIDTH AND BACKS OFF ONLY WHILE SPOTIFY IS
+  REFUSING SEARCHES — deliberate (0.9.37, Simon).** **ALWAYS-ON PACING WAS BUILT IN 0.9.36 AND
+  REJECTED AS FAR TOO SLOW — DO NOT PROPOSE IT AGAIN.** 0.9.36 ran the whole warm one album at a time
+  with a 1s gap (deadline ×4) whenever Spotty was on its shared default Client ID (`hasDefaultIcon`);
+  a cold pass went from about a minute to 20+, "a big step backwards" when no other service makes the
+  warm wait. 0.9.37: `_searchSpotify` stamps `$SPOTIFY_REFUSED_AT` when an EMPTY answer arrives while
+  Spotty's `hasError429` is set; the Spotify adapter's `pace_warm` (`_spotifyBackingOff`) is true for
+  `SPOTIFY_BACKOFF_WINDOW` (30s) after it; while true, `_resolveSection` in `warm` mode runs ONE album
+  and waits `PACED_WARM_GAP` (2s) after each LIVE resolve (a synchronous cache hit never waits; a
+  synchronous REFUSAL does, via the `_refused` tag — 0.9.39, §C `SYNCHRONOUS SPOTIFY REFUSAL`), then
+  returns to full width. The gap is ONE re-armed wakeup (`$gapTimer`) and `$holding` stops the launch
+  loop while it is pending (0.9.39). **Our own clock, not Spotty's flag** — that clears only on a successful
+  Spotify response, which at a low Spotify priority can be many albums away. **Views and home shelves
+  never back off.** A home shelf is NOT a second background pass: `homeReviews` / `homeBnm` /
+  `homeHsa` / `homeYear` call `_resolveSection` in `shelf` mode only when Material asks for the home
+  page, and normally read what the warm stored; they search only for albums the cache is missing
+  (cold start, or an expired "couldn't check" row), and `%RESOLVING` makes a shelf and the warm share
+  one search for the same album. So a cold home page during a Spotify lockout still sends its misses
+  at full width — accepted, the same call as a view (Simon, 2026-09-16). In the PUMP, not a queue before the search, because each leg's
+  `STREAM_SVC_TIMEOUT` watchdog would record a queued search ERRORED without it being sent. **Known
+  and accepted:** a 502 or a timeout carries no signal through Spotty, so a startup burst of those is
+  NOT backed off from — `empty_unverified` bounds its cost to a 1-day hold instead of 30. Window and
+  gap are a first setting, not measured. Do not report an unslowed view/shelf/502 burst as a gap;
+  re-raise only with a live log showing rows wrongly held.
 
 ### C. CLOSED FINDINGS
 
 Fixed findings are recorded per review in `docs/code-review-<version>.md`
 (0.9.22 → 0.9.26, 0.9.28, 0.9.29, 0.9.31) and in the Status sections below, each with its mechanism and
-its test. The whole 0.9.22–0.9.26 series is closed. Do not re-derive it.
+its test. The whole 0.9.22–0.9.26 series is closed: a finding that is one of those defects as
+described is a repeat, but a finding about the code those fixes added is not. The recorded
+decisions below (e.g. "Do not propose restoring") stay suppressed for their stated reasons.
+
+- **`_resolveSection` / `_refused` / `$holding` / `$gapTimer`: SYNCHRONOUS SPOTIFY REFUSAL AND ONE
+  WAKEUP — fixed 0.9.39 (2026-09-16, the LBF 1.0.5 port Simon asked for).** Two defects in 0.9.37's
+  back-off, both found by driving the real `_resolveSection` after LBF's review found the same pair:
+  (1) Spotty refuses IN-STACK (`getToken` does `return $cb->(-429)`), so a refusal reached the pump
+  while `$pumping` was still set and was taken for a cache hit — with Spotify the only service, a warm
+  sent every album into the lockout in one turn and stored each "couldn't check" for
+  `STREAM_INCONCLUSIVE_TTL` (probe: 10 albums, 10 searches, 0 wakeups); (2) every live completion
+  armed its OWN `PACED_WARM_GAP` timer, so the albums in flight when the back-off began left one
+  wakeup each, and each stray launched a search straight after the previous one completed (probe: 10
+  pending wakeups). **Fix:** `_svcCantAnswer` takes a 6th `$refused` arg (only `_searchSpotify`'s
+  429 branch sets it) and passes it to `$collect` → `$finish` → `$refusedAny`; `$resolve` puts
+  `_refused => 1` on the answer and on every coalesced waiter's (`_serveWaiters`);
+  `_findPlayableSubtitle` and `_findPlayableReview` forward it from ANY of their searches. The pump
+  holds when `_pacedWarm()` and (`!$pumping` or `_refused`), with one re-armed `$gapTimer` and
+  `$holding` in the `while`. **No PFR-only third pump and no flag race** — LBF's other two findings
+  do not apply (PFR has one pump; `%RESOLVING` slots already carry tokens). **Test:** `t_spotify.pl`
+  §9b (27 assertions, real resolver chain; §9's stubbed resolver cannot see either defect). Pre-fix
+  Browse.pm fails 14 of them; eleven mutants (each of the six tag carriers dropped, the tag always
+  set, no `$holding` in the loop, the hold ignoring `_refused`, no re-arm, the wakeup not releasing
+  the hold) each fail only their own checks, the stuck-hold one also failing §9's resume. All 14
+  suites green, 1,194 assertions. **Unproven live:** no Spotify refusal has been observed on a build
+  carrying it.
 
 - **The two-leg merge leads with LEG 1, unconditionally (0.9.31).** Do not propose
   restoring `[ @leg2, @leg1 ]`, and do not propose the middle position either — a
@@ -231,9 +439,9 @@ transcript will be rediscovered as a finding within days.
 - **High Scoring Albums** — Pitchfork's curated high-scoring picks as a second browsable, playable list.
 - **Latest Reviews** — the most recent album reviews.
 - **Best Albums of the Year** — Pitchfork's annual top-50 countdown, ranked and playable. Opens on the newest published list and promotes each new one automatically when it lands each December; every year back to 2016 is a tap away, readable #1-first or as Pitchfork's own 50-to-1 countdown.
-- **Grouped your way** — all three lists group under **genre** (default) or **week** dividers, carrying the Pitchfork mark; tap **Grouped by** on the list itself to switch, and all three follow.
+- **Viewed your way** — all three lists group under **genre** (default) or **week** dividers, carrying the Pitchfork mark, or show as one flat list **by score**, highest first; tap **View:** on the list itself to switch, and all three follow.
 - **One-tap playback** — each review is matched to a directly-playable album on **Qobuz / Tidal / Deezer**, shown with the service's own artwork; play it or queue it without searching.
-- **Genres on every row** — each review shows its Pitchfork genre(s) on the row and the detail page.
+- **Scores and genres on every row** — each review shows its Pitchfork score (*Score 8.1/10*) and genre(s) on the row, and the genre on the detail page.
 - **Read the full review** — links out to Pitchfork; the plugin keeps only artist, album, date, genre and the short capsule (never reproduces the review).
 - **Grid or list** — every row carries artwork, so Material's thumbnail/grid toggle stays available.
 - **Choose your services** — set the Qobuz / Tidal / Deezer search order (or turn one off).
@@ -326,6 +534,461 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 0.9.42 — a flat "View: Score" list, highest first (INSTALLED + VERIFIED LIVE, REVIEW CLOSED + PUSHED 2026-09-16)
+**REVIEWED 2026-09-16 on `dev` (`9b60d25` → `4e31b9f`, plus this ledger edit): NO FINDINGS, round closed, pushed to `origin/dev` at Simon's word.** Checked and held: `_groupedRows` dispatch is total with the same genre fallback as `_groupBy`; no reader of the retired `GROUPED_BY` token; the count appears once (header, not title); `_scoreOrdered` ties break newest-first on ISO text, unscored rows sink rather than drop, a real 0.0 stays above them, and the numeric guard is `_scoreLabel`'s. Suites `t_score` 61, `t_grouptoggle` 40, `t_sections` 46, `t_yearlist` 137, all green. Suppressed by the index, not cleared: line2 placement, no `_frozenOrder`, the `group_by` name.
+**FEATURE CLOSED 2026-09-16 (Simon): "close this feature request as done". The review-score work,
+0.9.40 → 0.9.42, is DONE** — the score on each row (0.9.40), the "Score" wording (0.9.41) and the flat
+`View: Score` list (0.9.42), all installed and verified. There is no open work on it. Anything wrong
+goes through a normal review and is fixed as it turns up; do not reopen it as a planned follow-up.
+Already known and not addressed: the four home shelves were not checked live for 0.9.42 (they never
+call `_groupedRows`), and a year row that somehow carried a score would render it (no upstream writer).
+**Asked for 2026-09-16 once the score was on the rows: "how feasible would it be to have one of our sort
+options be by score?" — then "it should be a flat list the sorts highest to lowest".** Planned first
+(`~/.claude/plans/hashed-bubbling-beaver.md`), three calls taken from Simon: the control reads
+**`View: Genre` → `View: Week` → `View: Score`**; the flat list gets a **bold header with the live
+count**, the Year view's shape; the **home shelves stay newest-first**.
+
+**A THIRD MODE ON THE EXISTING CONTROL, NOT A SECOND CONTROL.** `@GROUP_MODES` is now
+`('genre', 'date', 'score')`, still stored in `group_by` — the name is historical now that one mode is
+a sort, kept because renaming would orphan every stored choice (commented in `Plugin.pm`). The row verb
+became "View:" because no single accurate verb covered two groupings and a sort ("Grouped by Score"
+would describe a list with no groups). `PLUGIN_PITCHFORKREVIEWS_GROUPED_BY` is RETIRED, replaced by
+`PLUGIN_PITCHFORKREVIEWS_VIEW_BY`; `PLUGIN_PITCHFORKREVIEWS_VIEW_SCORE` is new. Both EN + NL. A
+dedicated `VIEW_SCORE` rather than reusing 0.9.41's `SCORE` row prefix, so rewording one cannot
+silently reword the other.
+
+**THE ORDERING IS LBF's `_sortWithin` SHAPE, DELIBERATELY — `_scoreOrdered`.** A Schwartzian transform
+with an EXPLICIT second key: score descending, then date newest-first. Two reasons, both measured:
+- **Perl's sort is not guaranteed stable**, and this list is addressed by POSITION (XMLBrowser's
+  `item_id`, re-resolved against a rebuilt feed; no session cache on a coderef top level). An order
+  that differed between walks would open the wrong row, so the tie-break is stated, never inherited.
+- **Ties are the common case, not an edge.** Live 2026-09-16: Best New Music 29 rows across SIX scores
+  (largest cluster 8), High Scoring Albums 29 across nine (largest cluster **14**), Latest Reviews 30
+  across 19. On two of three sections the SECOND key does most of the ordering.
+
+**A row with no usable score sorts LAST and is never dropped.** `-1` is the floor, because a bare
+`undef` numifies to 0 and would file an unscored row level with a real 0.0. Dropping was never an
+option — changing membership between renders is the other half of the positional-crumb problem. The
+numeric guard is `_scoreLabel`'s, so a value that will not render as a score is not sorted as one.
+
+**`_frozenOrder` WAS CONSIDERED AND IS NOT NEEDED.** LBF carries it for a set whose membership or keys
+move under a background warm (its genre filter). Here the score is on the parsed item, complete before
+any resolve, and `hide_unmatched` has been gone since 0.6.1 — the order is fixed from parse time.
+**Also audited while planning: PFR has NO `$args->{index}` / `$args->{quantity}` mapping anywhere** —
+it builds the whole list and lets XMLBrowser window it — so the LBF 0.9.207 rendered-rows drift class
+cannot arise in this plugin.
+
+**`_groupedRows` IS NOW TOTAL OVER `@GROUP_MODES`, and that was a live hole, not tidiness.** It read
+"genre, else weekly", and its no-mode fallback calls `_groupBy()` — which can now return `'score'`. An
+unhandled score would have rendered WEEKS under a control reading "Score": a silent wrong layout. It is
+now a ladder ending on a named mode, and an unrecognised value lands on `genre`, the same value
+`_groupBy` itself falls back to. `_groupLabel` follows the same rule.
+
+**`_scoreRows` reuses the Year view's assembly** (`_sectionHeader` + `_matchProgress`) rather than
+inventing a second flat layout. **The match count must appear exactly once**, so `fetchFeed` now
+branches on the mode: the grouping modes keep folding progress into the PAGE TITLE (they have no header
+to hang it on), and score mode passes a plain `title` because its header already carries the count —
+the Year view's `title => $label` rule.
+
+- **Untouched:** the home shelves (they never went through the grouper), Best Albums of the Year (never
+  goes through it, and carries no scores), `name`/`line1` (the ListenLater door from 0.9.40 stays shut),
+  the matcher, and every cache — no `PARSE_VERSION` bump, no `STREAM_KEY_VERSION` bump, no migration.
+- **Tests — 1,268 checks, all 15 suites green (was 1,239).** `t_score.pl` 61: strict descent, ties by
+  date against a fixture whose input order is neither date order nor its reverse (the fixture IS the
+  test — a stability-reliant sort passes a same-order one), score outranks date, 0.0 above a scoreless
+  row, count in == count out, junk floored BELOW a real 0.0, determinism across two passes, and the flat
+  render (one header, no dividers, branded icon). `t_grouptoggle.pl` 40: the full ring
+  genre→date→score→genre (a two-mode cycle could never have caught a reversed or skipping wrap), the
+  labels, the dispatch's totality, an unknown mode rendering as genre, the row text being a TOKEN, and
+  both new tokens present in `strings.txt` with EN and NL while the retired one is gone.
+  `t_sections.pl` updated for the new wording.
+- **Anti-tested seven ways, each biting:** tie-break dropped (score 2), sort reversed to ascending
+  (score 6), the `-1` floor removed (score 2), the score branch dropped from the dispatch (toggle 2),
+  `VIEW_BY` hardcoded instead of `cstring` (toggle 1), the numeric guard dropped from the sort (score 1),
+  the flat header removed (score 5 + toggle 3). **Two of those survived the first draft of the suite** —
+  the hardcoded format string, and the dropped numeric guard, whose three-row junk fixture returned the
+  right order for the wrong reason ('N/A' numifies to 0, still above an undef at -1). A real 0.0 row,
+  dated older than the junk row, is what makes the guard observable.
+- **BUILT AND PACKAGED at 0.9.42:** `install.xml`/`repo.xml` both 0.9.42 (bumped at Simon's yes — 0.9.41
+  was installed); zip 26 entries, 552,741 bytes uncompressed; `repo.xml <sha>`
+  `c51c0c349f34348a4a313b6cf60cb56ee691781d`; unzipped archive `diff -r` identical to the tree; both new
+  tokens present and the retired one absent in the SHIPPED `strings.txt`.
+- **INSTALLED 2026-09-16 — Simon: "works well" — and then VERIFIED LIVE over jsonrpc, 26 checks, 0
+  failures** (`group_by` flipped to `score` for the run and restored to `genre` afterwards). Per section:
+  Best New Music 29 rows, High Scoring Albums 29, Latest Reviews 30 — each the SAME count as genre view,
+  every row scored, scores never rising, exactly one header (`Best New Music (29)` etc.) and no dividers,
+  the toggle reading `View: Score (tap to change)`, tie clusters (largest 8 / 14 / 3) newest first, the
+  order IDENTICAL on a second request, and no `/10` in any title, favurl or `favorites_title`. The Year
+  view is still ranked 1..N with no scores. **Not checked live: the four home shelves** — they never
+  call `_groupedRows` (read in code), but no shelf request was made.
+- **The original pre-install checklist, kept for the record** — over jsonrpc: with `group_by` at
+  `score`, each of `item_id:0|1|2` monotonically non-increasing, no divider rows, exactly one header with
+  the section name and count, the same row count as genre mode; the 8- and 14-row tie clusters in date
+  order, newest first, and identical on a second request; genre and week unchanged; the Year view and all
+  four home shelves unchanged; still no `/10` in any label, favurl or `favorites_title`. Strings load at
+  plugin init, so a raw `PLUGIN_PITCHFORKREVIEWS_VIEW_BY` on the row means `strings.txt` did not ship.
+  README / CHANGELOG owed at the merge to main, as always.
+
+## Status: 0.9.41 — the score reads "Score 8.1/10" (REVIEW CLOSED, INSTALLED + TESTED, PUSHED 2026-09-16 with 0.9.42)
+**REVIEWED 2026-09-16 on `dev`, 3 commits ahead of `origin/dev` (`9b60d25`, `d099c74`, `d191c4c`; tree clean, so the range IS the review): NO FINDINGS, round closed.** What was checked and held: `_line2` has exactly two call sites, both in `_reviewRow`, both already holding a `$client`, and the only other callers are `t_yearlist.pl`'s two, updated — a fleet-wide grep finds no other Perl caller. The `defined $it->{score}` guard survives the CACHE round trip, not just the live parse: `score` is in `DB.pm`'s `%NULLABLE` and bound raw rather than through the `// ''` default, so a genuine `0` comes back as `0` and a year row comes back NULL — the 0.0 case the feature exists for is not lost on the cached path. `name`/`line1` are byte-identical with and without a score on BOTH the matched and unmatched branches (the ListenLater door, still shut). `PLUGIN_PITCHFORKREVIEWS_SCORE` is present in the SHIPPED `strings.txt` inside the zip, so it will not render as a raw token after install. All 15 suites green, 1,239 checks. **Two things were suppressed by the gates rather than cleared:** the "a year row carrying a score would render it" residual (a stated residual with no upstream writer) and the extra subtitle width (a wording/placement call Simon made after seeing 0.9.40 live). **NOT PUSHED** — unpushed is the review gate, and a push to `dev` is the PASS signal, which is Simon's to give.
+**INSTALLED AND TESTED 2026-09-16 (Simon: "it was installed and tested all good")** — reported by Simon, not re-measured here. Superseded as the rig build by 0.9.42.
+
+**Simon, 2026-09-16, after seeing 0.9.40 live: "can we prepend the score with Score so it shows Score
+8.1/10".** A wording call on a rendered surface — made, not re-argued.
+
+**THE WORD IS TRANSLATED, NOT A LITERAL, and that is why the signatures changed.** The plugin ships EN
+AND NL (`strings.txt`), and `_line2`'s only other worded part goes through `cstring`, so the new
+`PLUGIN_PITCHFORKREVIEWS_SCORE` does too. `_scoreLabel` and `_line2` therefore take `$client` —
+both `_reviewRow` call sites already had one to pass, so nothing new had to be threaded through the
+feed. `t_yearlist.pl`'s two direct `_line2` calls were updated with them.
+
+**A cstring for a MISSING token does not fail — LMS renders the RAW TOKEN to the user.** So
+`t_score.pl` now reads `strings.txt` itself and asserts the token is declared with both an EN and an
+NL translation. Without that, a rename would have shipped `PLUGIN_PITCHFORKREVIEWS_SCORE 8.4/10`
+onto 88 live rows with every other test still green.
+
+- **Everything 0.9.40 settled still holds and is still pinned:** the score is on `line2` only,
+  `name`/`line1` are untouched (the ListenLater label door — see `## Status: 0.9.40`), `defined
+  $it->{score}` is still the section test, and there is still no cache bump (`PARSE_VERSION` 3,
+  `STREAM_KEY_VERSION` 27).
+- **Tests: `tools/t_score.pl` now 45 checks** (the three strings.txt assertions added). Every
+  expectation is spelled with the TOKEN, because the harness's `cstring` stub returns it — which is
+  what makes a hardcoded English word a failing build rather than an invisible one. **Anti-tested
+  seven ways, each biting:** `defined`→truthiness 2, `sprintf` dropped 5, the numeric guard dropped 2,
+  the score moved onto `line1` 9, the score removed from `line2` 8, **`cstring`→a hardcoded 'Score' 15,
+  and the token renamed without updating `strings.txt` 15.** All 14 prior suites green (1,239 total).
+- **BUILT AND PACKAGED at 0.9.41:** `install.xml`/`repo.xml` both 0.9.41; `repo.xml <sha>`
+  `249194eee38d127cd67b815fd94d91169973fc2b`; unzipped archive `diff -r` identical to the tree; the
+  token confirmed present in the SHIPPED `strings.txt`. **NOT INSTALLED** — strings are read at plugin
+  init, so the reinstall/restart is what makes the word appear; if a row ever shows the bare token,
+  `strings.txt` did not ship. README / CHANGELOG owed at the merge to main, as always.
+
+## Status: 0.9.40 — the Pitchfork score on a review row (INSTALLED + VERIFIED LIVE 2026-09-16)
+**Asked for 2026-09-16 (Simon): "add the score to the display of each row … for the 3 review sections
+not the Year reviews as they have no score. Need to ensure this doesnt change any behaviour for LL and
+isnt searched at all its just for display purposes."** Format chosen from four offered: **out of ten,
+leading** — `8.4/10 · 3 September 2026 · Rock - <capsule>`.
+
+**IT IS ON `line2`, AND IT MUST NEVER MOVE TO `line1`/`name`.** That is the whole safety argument, and
+it is the Spotify case that forces it: a Spotify-matched row is `native_favurl`, so `_attachFavUrl` is
+skipped wholesale and the row carries NO `&al=` — ListenLater therefore stores the row LABEL as the
+album title (measured on plex:9000 at 0.9.39: `favorites_title "The Cure - Mixed Up"`, High Scoring
+Albums). Decorating the favurl to fix that is settled as WRONG (§A2 ``native_favurl`` SKIPPING). So
+`name`/`line1` are byte-for-byte unchanged in every section, matched and unmatched alike, and nothing
+on LL's add path reads `line2` (LL `Plugin.pm` `_finishAlbumAdd` prefers `&al=` then `$p{name}`; its
+only `line2` reads are on a SERVICE's own album node, in `Sources.pm`).
+
+**`defined $it->{score}` IS THE SECTION TEST — no section plumbing was added.** `_parseYear` hardcodes
+`score => undef` on every year entry ("year-end lists carry no score", API.pm) and the DB column is
+NULLABLE for exactly that reason, so the three review sections separate from the year lists by
+construction. `defined`, NOT truthiness: Pitchfork awards 0.0 (Jet, *Shine On*), and a truth test drops
+precisely the score most worth reading.
+
+**NO CACHE BUMP, AND THE FEATURE IS LIVE ON THE WARM STORE IMMEDIATELY.** `PARSE_VERSION` stays at 3
+and `STREAM_KEY_VERSION` stays at 27 — nothing about fetching, parsing or matching changed. `score`
+entered `DB.pm`'s `@COLS` in the SAME commit that set `PARSE_VERSION` to 3 (`e0984c2`, 0.9.26), so
+every list already stored carries it and no re-fetch is needed to see the number.
+
+**ON "isn't searched", stated precisely rather than claimed.** It stays out of the matcher (the
+resolver queries `$it->{artist}` / `$it->{album}`), out of the favurl, out of every cache key and out
+of the LL title. It is NOT invisible to Material's search-within-list, which scans title AND subtitle
+(`search-list.js` `searchListHasStr`) — no visible text can be. That line already carries the date, the
+genre and the capsule prose, so the score adds no searchable surface that was not already there.
+
+- **`_line2` has exactly two call sites**, both in `_reviewRow` (the matched-row relabel and the
+  unmatched-row return). It feeds no cache key, no favurl and no query.
+- **Tests: `tools/t_score.pl`** — 42 checks against the REAL subs. Formatting (one decimal kept, a
+  round 8 and a perfect 10 gaining theirs, a JSON string accepted), 0.0 as a real score, non-numeric /
+  empty / reference / missing input all refused, the scoreless CONTROL line proving the separator, the
+  year-row line unchanged, truncation with the score in front, and — the assertions that exist for LL —
+  `name` and `line1` IDENTICAL with and without a score on a matched (Spotify-shaped) row and an
+  unmatched one. **Anti-tested five ways, each biting:** `defined`→truthiness fails 2, `sprintf`
+  dropped fails 5, the numeric guard dropped fails 2, the score moved onto `line1` fails 9, the score
+  removed from `line2` fails 8. All 14 prior suites still green (1,194 + 42 = 1,236).
+- **STATED RESIDUAL, not a defect:** a year row that somehow CARRIED a score would render it. Nothing
+  upstream writes one, and `t_score.pl` pins that consequence explicitly rather than pretending the
+  guard covers it.
+- **BUILT AND PACKAGED at 0.9.40:** `install.xml`/`repo.xml` both 0.9.40; zip 26 entries, 546,450 bytes
+  uncompressed; `repo.xml <sha>` `b6f0363ae966741e5ea8bb22456a55b5f3ea04ab`; unzipped archive `diff -r`
+  identical to the tree. README / CHANGELOG owed at the merge to main, as always.
+- **INSTALLED AND VERIFIED LIVE 2026-09-16 on plex:9000, mechanically over jsonrpc — every claim above
+  measured, not inspected:**
+  - **88 of 88 review rows carry a score** across the three sections (Best New Music 29, High Scoring
+    Albums 29, Latest Reviews 30), every one matching `^\d+\.\d/10 · `. Observed range 2.0/10 (Bloc
+    Party, *Anatomy of a Brief Romance*) to 8.6/10 — so the low end renders, which is what the
+    `defined` guard exists for.
+  - **0 of 50 year rows carry one.** Best Albums of the Year still leads its label with the rank and
+    its line2 with the year (`1. Jazmine Sullivan - Heaux Tales` / `2021 - On her previous album…`).
+    The section test holds on live data with no section plumbing.
+  - **THE LL DOOR IS SHUT, measured on the row that proves it.** 82 matched rows: 80 Qobuz, 1 Tidal,
+    1 Spotify. The Spotify row is the one with NO `&al=` — the row whose LABEL LL stores — and its
+    `favorites_title` reads `Zel - Still Right Here`. **Zero `/10` in any row label, any
+    `favorites_title` or any favurl, on any of the 82.** Qobuz/Tidal `&al=` still clean
+    (`ULTIMATE%20LOVE%20FOREVER`).
+  - **No re-fetch and no re-resolve were needed** — the scores were there on the first open against the
+    warm store, as the no-cache-bump reasoning predicted.
+- **STILL UNPROVEN, and 0.9.40 does not change it: 0.9.39's Spotify refusal path.** Its code is now ON
+  the rig, but only 1 of 82 rows resolved to Spotify and the log carries no `error429` and no
+  `resolve Spotify: empty answer while Spotify is rate-limiting` line, so the paced back-off has still
+  never fired in the field. Do not record it as verified.
+
+## Status: 0.9.39 — a synchronous Spotify refusal holds the warm; one paced wakeup (BUILT, REVIEW CLOSED + PUSHED, NOT INSTALLED)
+**Built and committed on `dev` 2026-09-16 (Simon: "version up PFR and zip then commit"), then REVIEWED 2026-09-16 (a32a86d + 90e3749, 1,647 lines): NO FINDINGS, round closed, PUSHED to `dev`.** The LBF 1.0.5 back-off fix, ported: see §C `SYNCHRONOUS SPOTIFY
+REFUSAL AND ONE`. It touches `Browse.pm` (`_svcCantAnswer`, `_searchSpotify`, `_findPlayable`,
+`_serveWaiters`, `_findPlayableSubtitle`, `_findPlayableReview`, `_resolveSection`) and
+`tools/t_spotify.pl` (§9b) only. **Verified before the real file was touched:** the patch was applied
+to a scratch copy and driven by a probe — 26 checks, pre-fix 13 failing, 11 mutants each caught —
+and all 14 suites were run against both copies (identical results). **BUILT AND PACKAGED at 0.9.39:**
+`install.xml`/`repo.xml` both 0.9.39; zip 26 entries, 296,629 bytes; `repo.xml <sha>`
+`e8c4a06a5d97525d0de383b2afe821922f31d4e4`; unzipped archive `diff -r` identical to the tree; all 14
+suites green after the bump (1,194). README pages not regenerated (owed at the merge to main).
+**NOT INSTALLED, NOT VERIFIED LIVE** — what to look for once it is: after Spotty's `error429` lines,
+PFR's `resolve Spotify: empty answer while Spotify is rate-limiting (429)` warns should arrive about
+PACED_WARM_GAP apart during a warm, not in a burst. No
+matcher change, no cache bump (a refused row is already stored at `STREAM_INCONCLUSIVE_TTL`).
+**Docs:** §B `PACED_WARM_GAP` entry (the synchronous refusal, the single wakeup, and why home shelves
+are not a second pass), §C, the index, and the fleet adapter spec §6 — edited in LBF and re-copied
+here and to LL (now sha1 `fccba6c4…`, after the line-reference pass). LBF's `docs/spotify-rate-limits.md` and ledger point here.
+README / CHANGELOG are owed at the merge to main, as always.
+
+## Status: 0.9.38 — "Title: Subtitle" reviews retry on the title before the colon; VERIFIED LIVE
+**FEATURE CLOSED 2026-09-15 (Simon): Spotify support, 0.9.35 → 0.9.38, is DONE.** This covers the
+Spotty adapter, the storm/429 fixes, reactive back-off and the subtitle retry. There is no open work
+on it. Anything wrong goes through a normal review and is fixed as it turns up. Do not reopen this
+work as a planned follow-up. Already known, recorded, and not addressed: Rafael Toral / Still House
+Plants — SETTLED 2026-09-15: NOT IN SPOTIFY'S CATALOGUE, checked live through Spotty. Toral's Spotify
+albums are only *Space Quartet* and *Live in Minneapolis*, so *Spectral Evolution* is absent. Still
+House Plants has NO Albums section, only 4 singles/EPs, so *If I don't make it, I love u* is absent.
+Both fall back to Qobuz correctly. Not a matcher gap, Jay Electronica's spaced-letter Spotify artist credit, README
+not regenerated (owed at the merge to main), `reviewDetail` subtitle wiring untested, and the
+PFR-only registry fields `empty_unverified`/`pace_warm` missing from the fleet adapter spec.
+
+**Built exactly to the audit below** (Simon approved it with every guard). `_findPlayableReview` now
+sends a slash-free title through `_findPlayableSubtitle`: the FULL title first; only on a miss, the
+text before the first ": " (`_subtitleBase` — no slash, not the artist's name, >= 2 normalised
+chars), accepting a node only when `_matchExactness` is `exact` AND its `_year` is >=
+`_subtitleMinYear` (a review's year; a year-end entry's `year - 1`; no year = no retry, and a node
+stating no year is refused). With nothing trustworthy the caller gets the FULL title's own miss.
+The guards run in the caller on every call, never on cached items. All three callers pass the year:
+the resolve pump, `reviewDetail`, and the Refresh row (still `$force`).
+
+**Reach, measured with the real subs over the whole corpus: 5 of 633 items** — Badu, Turnstile,
+Beyoncé, Jay Electronica, Dawn Richard (Navy Blue excluded by the slash rule). Of those, only Badu
+and Dawn Richard can change; the other three already match on the full title (or fail on the artist).
+
+**No matcher change** (`matcher_sync_check.py` exits 0). **No cache bump:** a subtitled miss is a
+`STREAM_NOMATCH_TTL` entry that self-expires within 24h, and "Refresh streaming match" retries at once.
+
+**Tests: 14 suites green, 1,167 assertions** (`t_releaserank` 146 → 169, section 3i). **Anti-tested
+seven ways, each failing only its own checks:** year guard removed 2 (Turnstile + yearless); exact
+guard removed 1 (prefix sibling); slash exclusion removed 1; full-title-first removed 1 (the
+"no second resolve" cost assertion); pump wiring removed 1; year-list slack removed 2; artist-name
+guard removed 1. **Coverage gap, stated:** `reviewDetail`'s call site is not asserted (the pump and
+Refresh wiring are).
+
+**BUILT AND PACKAGED at 0.9.38.** `install.xml`/`repo.xml` both 0.9.38; zip 26 entries, 295,474 bytes;
+`repo.xml <sha>` `ebfb40b775f67541a672ab3a11f3f8abb89f8982`; unzipped archive `diff -r` identical to
+the tree. README pages still not regenerated.
+
+**Verified live 2026-09-15 (Simon):** once 0.9.38 was installed, the Badu row matched straight away
+in the list, with no drill-in and no Refresh. Dawn Richard *Second Line: An Electro Revival* (2021
+Best Albums list) also matched live. Both rows the audit said could change are now confirmed.
+
+### The audit this was built from (2026-09-15)
+**Field case:** *Erykah Badu / The Alchemist — Before the World Blows: The Abi and Alan Experiment*
+is unmatched. Spotify AND Qobuz both carry it as *Before The World Blows* (2026); the real
+`_albumMatches` gives artist 1 / title 0, because the prefix tier tolerates extra words on the
+CANDIDATE only. Discography's ledger records the same class ("Library title is SHORTER than MB's")
+as a real, unresolved matcher gap. Proposed as PFR call-site logic beside `_splitAlbumTitles`, NOT a
+matcher change: full title first; on a miss, retry the part before the first ": ".
+
+**Corpus, measured rather than imagined:** all 3 feeds + every year list 2016–2025, parsed with the
+real `API::_parseState`/`_parseYear` = **633 unique items, 6 with ": "** (`4:44` and the Four Tet
+glyph title have no following space and are excluded by construction). Catalogue checked on Qobuz
+and Spotify for each pre-colon title:
+- Badu (2026) and Dawn Richard *Second Line: An Electro Revival* → services *Second Line* (2021):
+  the SAME records — the two rows the retry fixes.
+- Turnstile *NEVER ENOUGH: VERSIONS*, Beyoncé *Homecoming: The Live Album*, Navy Blue *Song of Sage*:
+  services carry the full title, so the retry never fires.
+- Jay Electronica *Act II…*: Spotify carries the full title but credits "J A Y E L E C T R O N I C A",
+  so the ARTIST gate fails — a different gap the retry cannot touch.
+
+**Traps the audit found, each needing its own guard:** (1) the pre-colon title can be a DIFFERENT
+real record by the same artist — Turnstile's 2025 *NEVER ENOUGH* — and exact-only does not stop it;
+a service year no earlier than the review's does (2025 < 2026). (2) Prefix siblings (*NEVER ENOUGH:
+PORCHES VERSION*) — exact-only stops them. (3) Same title, other artist (*Homecoming* by America,
+James Arthur) — the artist gate stops them. (4) Year lists include late-previous-year releases
+(*Song of Sage* 2020 in the 2021 list), so a year guard there needs one year of slack. (5) Titles
+with BOTH a slash and a colon overlap the combined-review path — exclude them from the retry.
+Also to respect: the pre-colon key is SHARED with any review whose title IS that text, so the
+exact + year guards must run at the caller on every call, never be baked into the cached items.
+
+## Status: 0.9.37 — the warm backs off only while Spotify refuses; VERIFIED LIVE (feature closed, see 0.9.38)
+**Replaces 0.9.36's fix 3, which Simon rejected as far too slow** (ledger B, `pace_warm`). Fixes 1
+and 2 and the `:27:` bump are unchanged from 0.9.36 (entry below).
+
+- **Removed:** `_spottyDefaultClient` / `hasDefaultIcon`, `PACED_DEADLINE_FACTOR`, the per-section
+  `$paced` and its `warm: pacing` milestone. The warm is at full width again unless refused.
+- **Added:** `$SPOTIFY_REFUSED_AT`, stamped by `_searchSpotify`'s 429 branch; `_spotifyBackingOff`
+  (true for `SPOTIFY_BACKOFF_WINDOW`, 30s) as the Spotify adapter's `pace_warm`; `_pacedWarm` is now
+  asked before EVERY dispatch (width 1) and after every live completion (`PACED_WARM_GAP`, now 2s).
+- **Trap hit while building:** `our $SPOTIFY_REFUSED_AT` was first declared BELOW `_searchSpotify`,
+  and `our` is lexically scoped — nine suites failed to LOAD. Moved above its first use; the
+  anti-test round run before the fix was discarded as void.
+
+**Tests: 14 suites green, 1,144 assertions** (`t_spotify` 75 → 77; section 9 rewritten around the
+refusal clock, section 7 asserts the stamp and that a real miss does not set it). **Anti-tested five
+ways, each failing only its own checks in `t_spotify`:** width not dropped 3; gap removed 4; stamp
+removed 1; window never expiring 4; the 429 branch removed 3. `t_releaserank` and `t_perf` unchanged
+under all five. `matcher_sync_check.py` exits 0.
+
+**BUILT AND PACKAGED at 0.9.37.** `install.xml`/`repo.xml` both 0.9.37; zip 26 entries, 293,723 bytes;
+`repo.xml <sha>` `55fee6d3948f73a04a5a4e7447116be000fbe662`; unzipped archive `diff -r` identical to
+the tree. `README.html`/`index.html` still not regenerated; the two PFR-only registry fields are
+still not in the fleet adapter spec.
+
+**LIVE CHECK, 2026-09-15 15:13–15:20 (installed on plex):** Best New Music 27 Spotify / 2 unmatched,
+High Scoring 27 / 2, Latest Reviews 26 / 1 Qobuz (Sylvan Esso *Ow ∞*) / 2. **Best Albums of the Year
+(2024) had 10 rows on Qobuz** that Spotify carries (Sabrina Carpenter, Laura Marling, Mdou Moctar…):
+the warm reached that list at full width at 15:14, Spotify answered 5 logged 429s (retry after 5s)
+and refused the rest of the window silently, and `_searchSpotify` logged the new
+`empty answer while Spotify is rate-limiting (429)` warn (Cassandra Jenkins). After Spotify went
+quiet, a serial "Refresh streaming match" on those 10 moved **8 to Spotify** with zero new errors;
+Rafael Toral *Spectral Evolution* and Still House Plants *If I don't make it, I love u* stayed on
+Qobuz with no error (a catalogue or matcher question, not a rate limit). **So the back-off works but
+only starts after the first refusal, and fix 1's one-day hold still leaves a refused row on Qobuz
+for a day.** A 1h hold for that case was proposed and NOT pursued (Simon, 2026-09-15): a Spotify user
+rarely has a second service, and this rig's Spotify-above-Qobuz setup is the atypical one. With
+Spotify as the ONLY service there is nothing to fall back to — a 429 refusal is already ERRORED and
+retried within the hour (fix 2), and the back-off applies. Test Spotify-only by setting the other
+three priorities to 0.
+
+**To verify live:** the startup warm should take about as long as before Spotify (no `warm: pacing`
+line exists any more); if Spotify 429s, Spotty's log shows it and PFR logs `empty answer while
+Spotify is rate-limiting (429)`, after which the warm visibly slows for ~30s and recovers; rows that
+still land on Qobuz under an empty Spotify answer carry the 1-day TTL.
+
+## Status: 0.9.36 — SUPERSEDED BY 0.9.37 (fix 3 rejected); a Spotify rate-limit storm no longer pins rows to another service
+**Three fixes for the 0.9.35 field result (Spotify at priority 1, Spotty on its shared default
+Client ID), all in `Browse.pm`, plus a correctness cache bump.** Diagnosis, measurements and the
+control test are in the 0.9.35 entry below; the decisions are ledger B (the amended "empty Spotty
+answer" entry and the new `pace_warm` entry).
+
+1. **`empty_unverified` → `_streamTtl`'s optional 5th argument.** When a flagged adapter ranked
+   ABOVE the winner answered empty or errored (not standing-unavailable), the row is cached at
+   `STREAM_UNVALIDATED_TTL` (1 day) instead of `STREAM_FOUND_TTL` (30). A 4-argument call is
+   unchanged, so the 141-cell table in `t_releaserank` 3e is untouched. The log line says
+   `UNVALIDATED (a higher-priority service's empty answer is unverifiable, …)`.
+2. **`_spottyRateLimited` in `_searchSpotify`.** An EMPTY list while Spotty's `hasError429` is set
+   goes through `_svcCantAnswer` as ERRORED. Spotty sets it on a 429 and clears it on the next
+   successful response, before the callback runs, so a genuine empty answer is never doubted.
+   A list with albums is always an answer. `can`- and eval-guarded.
+3. **`pace_warm` → `_pacedWarm` in `_resolveSection`.** Warm mode only, while an adapter's
+   `pace_warm` coderef says so (Spotify: `_spottyDefaultClient`, i.e. `hasDefaultIcon`): width 1,
+   `PACED_WARM_GAP` (1s) after each live resolve, deadline × `PACED_DEADLINE_FACTOR` (4). One
+   `warm: pacing N item(s)` milestone per section. Gap and factor are a first setting, not measured.
+
+**`STREAM_KEY_VERSION` 26 → 27, a correctness bump** — the 30-day Qobuz pins 0.9.35 wrote under `:26:`
+are wrong and fix 1 only governs new writes. It ships WITH the pacing on purpose: the bump sends the
+whole store through a cold warm again.
+
+**Tests: 14 suites green, 1,142 assertions.** `t_spotify` 45 → 75 (sections 7–9), `t_releaserank`
+140 → 146 (section 3h, end to end through `_findPlayable`); the harness's `adapters_returning` now
+passes an `extra` hash of table fields. **Anti-tested seven ways, each failing only its own checks:**
+call site not passing the flags 2 (t_releaserank); `_streamTtl` ignoring them 5; the 429 check removed
+2; pacing forced off 5; the gap removed 2; the deadline stretch removed 1; a standing-unavailable
+flagged service allowed to shorten 1. **Section 9 first DIED** on the pacing and gap mutants
+(calling a timer that was never armed); it is guarded now, so a broken build fails by name.
+`matcher_sync_check.py` exits 0 — no matcher change.
+
+**BUILT AND PACKAGED at 0.9.36.** `install.xml` and `repo.xml` both say 0.9.36, the zip is rebuilt
+(26 entries, 293,545 bytes), `repo.xml <sha>` is `a2a73e4b920de104d63565d0ba3aeea14c0d939e`, and the
+unzipped archive is `diff -r` identical to the tree. `README.html`/`index.html` still NOT regenerated
+(the tool run was permission-blocked in 0.9.35's session). **Not in the fleet adapter spec yet:**
+`empty_unverified` and `pace_warm` are PFR-only registry fields; the canonical
+`docs/streaming-adapter-spec.md` in the LBF repo does not list them.
+
+**To verify live:** after install, the startup warm should log `warm: pacing …` per section and
+Spotty's log should show few or no `502`/`429` lines; rows should move to Spotify as the warm
+re-resolves (slowly — about one album a second or slower); and any row that still lands on Qobuz
+beneath an empty Spotify answer should carry the 1-day TTL (visible with `debug_log` on as
+`UNVALIDATED (a higher-priority service's empty answer…`).
+
+## Status: 0.9.35 — Spotify (via Spotty), VERIFIED LIVE (feature closed, see 0.9.38)
+**A fourth streaming service, ported from the ListenBrainz sibling (PR #17, honzup).**
+Plan: `~/.claude/plans/lets-scope-out-adding-rippling-ocean.md`.
+
+**BUILT AND PACKAGED at 0.9.35** (2026-09-15). `install.xml` and `repo.xml` both say 0.9.35, the
+zip is rebuilt (26 entries, 290,739 bytes) and `repo.xml <sha>` recomputed to
+`7d99a0c3cd4b851a52b7d98e0983098e2f76b024`. Verified by `diff -r` of the unzipped archive against
+the tree: identical. All 14 suites exit 0. **`README.html`/`index.html` NOT regenerated** — the
+tool run was blocked by a permission prompt this session, so the Pages version badge still reads
+0.9.34; rerun `python3 tools/make_readme_html.py`.
+**The first live check was against 0.9.34, not this build** — Spotify at priority 1 still resolved
+*Angela Autumn — Believer* to Qobuz after a forced Refresh, with no Spotify line in the log, because
+no zip carrying the adapter existed yet.
+
+**VERIFIED LIVE on 0.9.35 (2026-09-15, Spotify at priority 1, Qobuz 2).** A forced Refresh on
+*Angela Autumn — Believer* resolved to Spotify: a 12-track `spotify://track:` list with `i.scdn.co`
+art, served on the next open FROM CACHE (so the `rebuild` → `OPML::album` reattach works). The row's
+`presetParams.favorites_url` is Spotty's own `spotify:album:19VsLR7idZdpFkpmwBG0aC`, undecorated
+(`native_favurl` works). Latest Reviews: 10 rows Spotify, 17 Qobuz, 2 unmatched.
+
+**RESOLVED IN 0.9.36 (see the Status entry above) — ledger B's "empty Spotty answer is a real miss"
+cost MORE than it stated when Spotify is ranked ABOVE another service.** The startup warm hit **184 Spotify search `502 Bad Gateway`s**
+(161 in 13:55, 23 in 13:56, then 1). Spotty swallows those into `[]`, PFR records Spotify ANSWERED,
+the next service's match wins and is cached at `STREAM_FOUND_TTL` — **30 days** on the lower-priority
+service. That is why 17 rows stayed Qobuz. The ledger entry priced the trade only at the default
+priority 4 (a Spotify-only album held as a 24h no-match). Not yet decided; the workaround is the
+per-row Refresh.
+
+**ROOT CAUSE, measured 2026-09-15 — sustained VOLUME, not width, and three things compound it:**
+1. **Registering Spotify re-keys every stream entry** (`_svcOrder` is in the key), so the whole store
+   resolves cold — ~140 feed albums at the startup warm, then ~500 year-list albums on the backfill.
+   At priority 1 every album probes Spotify FIRST, and an empty answer fires the album-title leg, so
+   ~2 Spotify searches per album. Log: 322 Spotty error lines in 13:55 alone; 429s (`retry after 3`
+   / `7 seconds`), 502s and `Timed out waiting for data` during the 2016 backfill year, 14:03–14:06.
+2. **Spotty has no pacing and hides every failure.** `API::_call` fires each request independently;
+   `_gotError` hands a non-429 error back as `{name=>'Unknown error: …'}`, which `Pipeline::_extract`
+   reduces to `[]` — identical to a zero-hit. A 429 sets `spotty_rate_limit_exceeded` for Retry-After,
+   and during that window `getToken` answers `-429` with NO request and NO log line, so the log
+   UNDERCOUNTS the failed searches. Source read from michaelherger/Spotty-Plugin master.
+3. **PFR reads that `[]` as "not on Spotify"**, the next service wins, and it is pinned 30 days.
+
+**The control test:** 10 Refreshes fired simultaneously at 14:15:43 (server time) — the resolver's
+full width, on a quiet server — produced **zero** Spotify errors and moved 8 of 10 rows to Spotify
+(Sylvan Esso *Ow ∞* and *Synthetic Water Music* stayed Qobuz with no error: a separate catalogue or
+matcher question, not investigated). A single quiet Spotty search for the first query that 502'd
+(`Helena Gao`) also answered normally. Errors stopped at 14:06 once the backfill finished.
+
+- **Registry first (spec §8 — both PFR sites closed).** One `@SERVICES` table in `Browse.pm` now
+  feeds the `_orderedAdapters` memo stamp (it was a hardcoded `qw(qobuz tidal deezer)`, so a fourth
+  service's priority change could never invalidate the memo), `serviceStatus`, and `Settings.pm`'s
+  `prefs()` + sanitise loop. `_rebuildStreamItems` lost its per-service elsif chain: each adapter
+  carries its own `rebuild` coderef, taken inside the same `->can` guard that registers it.
+- **`_searchSpotify`**: class-method `getAPIHandler`, `search($cb, {query, type=>'album', limit=>50})`,
+  title in `name`, renderer `OPML::_albumItem`, reattach `OPML::album`. Stamps `_albumid` (id, else
+  parsed from the uri), `_svctitle`, `_year`. `native_favurl => 1` keeps Spotty's own
+  `spotify:album:<id>` favurl — decorating it breaks replay (greedy `/album:(.*)/`). The two
+  deliberate differences from LBF are ledger B (`_searchSpotify`). `_candReleaseType` is NOT ported
+  (declined 0.9.27).
+- **`svc_priority_spotify => 4`** (last). No settings template or string change — the page iterates.
+- **NO CACHE BUMP**: `_svcOrder` is part of the stream key, so registering an adapter re-keys by
+  construction (spec §1). No matcher change; `matcher_sync_check.py` exits 0.
+- **Tests: new `tools/t_spotify.pl` (45)**; all 14 suites green (1,106). Anti-tested three ways, each
+  mutant failing only its own property: the old hardcoded memo stamp **2 red**, the `native_favurl`
+  guard removed **1**, the Spotify `rebuild` field removed **1**. `t_perf` needed its two `@HOLD`
+  fixtures moved to the new contract (a `rebuild` coderef on the adapter, not a stubbed
+  `QobuzGetTracks`) — the premise changed, not the assertion.
+- **UNVERIFIED LIVE.** The session's `pref plugin.state:Spotty` probe got an empty reply. To verify:
+  `debug_log` on, look for `search Spotify/albums raw=N`; set Spotify to priority 1, resolve a review,
+  **re-open the page** (the rebuild test), set 0 and confirm it hides. Playback is blocked on this rig
+  (memory `spotify-playback-blocked-on-test-rig`) — a tracklist on drill-in is the proof, and the
+  account's Web-API 429s can show as empty pools, so read `raw=` before calling a miss.
+- **Owed at the merge to main:** README (services table, requirements), CHANGELOG with honzup credit,
+  `install.xml <description>`, the feature-summary lines naming "Qobuz / Tidal / Deezer", and the
+  social tag line.
 
 ## Status: 0.9.34
 **Dutch (NL) translations — the plugin's first second language. Community contribution
@@ -3347,10 +4010,21 @@ feature is a new parser and a new feed, not a second pipeline. `_streamId` is
   date down 50 rows says nothing. The outbound link says **"Read the full list"**
   (`_linkLabel`) — Pitchfork puts **no per-entry review link** in these articles, so promising
   a review the tap won't deliver would be a lie.
-- **The rank prefix on the row label is safe for ListenLater.** `&al=` carries the matched
-  SERVICE's title (`_svctitle`, set from `$album->{title}` on every matched candidate in all
-  three search subs), so LL never falls back to reading Material's label. Reviews (no `rank`)
-  are byte-for-byte unchanged.
+- **The rank prefix on the row label is safe for ListenLater — TRUE FOR FOUR SERVICES, NEVER FOR
+  SPOTIFY (corrected 2026-09-16).** `&al=` carries the matched SERVICE's title (`_svctitle`, set
+  from `$album->{title}` on every matched candidate in all three search subs), so LL never falls
+  back to reading Material's label. Reviews (no `rank`) are byte-for-byte unchanged.
+  **What this entry could not know:** it was written before the Spotify adapter, and Spotify is
+  `native_favurl` — `_attachFavUrl` is skipped entirely, so those rows carry NO `&al=` and LL does
+  read the label, rank and all. Confirmed on plex:9000: `favorites_url spotify:album:5g9…`,
+  `favorites_title "1. Jazmine Sullivan - Heaux Tales"`. **The skip is still correct and must not
+  be "fixed" by decorating the favurl** — see A2 `native_favurl` SKIPPING. **And it is not only a
+  year-list problem:** any Spotify-matched row in Best New Music, High Scoring Albums or Latest
+  Reviews carries an `"Artist - Album"` label and stores it as the LL title just the same
+  (measured: `The Cure - Mixed Up`, High Scoring Albums). Played no longer depends on it: LL
+  matches Spotify plays by release id (LL `CLAUDE.md` §B, `A SPOTIFY ROW'S STORED ALBUM TITLE CAN
+  NEVER MATCH`, LL 1.0.3 dev, installed and tested; playback test deferred, classed OK). LL also replaces the label with the
+  matched Spotify album's name for display (same entry). Neither is a PFR change.
 - **Warm resolves ONLY the latest year.** Older years are immutable and resolve on demand;
   re-matching all ten daily would be 500 albums of pointless streaming traffic. A published
   list never changes, hence `YEAR_TTL` 30d / `YEAR_FB_TTL` 365d against the listing pages' 3h.
@@ -3805,7 +4479,14 @@ repo.xml         # <extensions> (plural — repo-install manifest)
     false-match wildly, so it's left as an accepted miss.
 
 ### Services & the streaming cache round-trip (IMPORTANT)
-**Qobuz + Tidal + Deezer** (Bandcamp not ported — manual/loop-blocking). Priorities on
+
+**ADDING A NEW SERVICE — READ `docs/streaming-adapter-spec.md` FIRST.** It is the adapter contract across the released plugins (LBF, PFR, LL), carried verbatim in each repo: what a service's own plugin must expose (R1-R8), the leg semantics (`undef` = inconclusive vs `[]` = a real miss, and the TTL each picks), the item fields to stamp, the acceptance tests, and — per plugin — every site that still forces an edit OUTSIDE the adapter table, with the registry field that closes it. **This repo now has NONE** (closed with the Spotify adapter): a new service is one entry in `_detectAdapters` (with its `rebuild` coderef, and `native_favurl` if its renderer's favurl already replays), one row in `@SERVICES`, one pref default in `Plugin.pm`. Edit the canonical copy in the ListenBrainz repo and re-copy, per the header.
+
+**SPEC RE-COPIED 2026-09-16 (sha1 `504f722a…`, identical in LBF, PFR and LL).** §6's rate-limit rules gained three points from LBF's third Spotify back-off review: tag the refusal on the answer itself; every loop that searches must check the back-off on its own (nothing inherits it); and a refusal can answer SYNCHRONOUSLY (Spotty's `getToken` returns `$cb->(-429)` in-stack), so a pump must not treat every in-loop completion as a cache hit. Its pointer to `docs/spotify-rate-limits.md` now says that file is in the LBF repo only. No code in this repo was changed by the re-copy.
+
+**SPEC RE-COPIED AGAIN 2026-09-16 (sha1 `f43421aa…`, identical in LBF, PFR and LL).** §6 now names PFR's implementation of the refusal rules (0.9.39): the 6th `$refused` argument to `_svcCantAnswer`, `_refused` forwarded by the subtitle and "A / B" wrappers and given to callers that joined the search, and PFR's ONE consumer (`_resolveSection` in `warm` mode — home shelves resolve on request, like a view). It also gained "keep the gap to ONE wakeup, re-armed". The PFR code this describes is in this repo's working tree — see §C `SYNCHRONOUS SPOTIFY REFUSAL AND ONE`. **Then, the same day, every `Browse.pm:NNNN` / `Settings.pm:NN` / `Sources.pm:NN` line reference was replaced by the sub or variable it points at (they had drifted — e.g. LBF's adapter table cited at 5688, now ~7069), §8's sites re-checked against current code, and §3's reference shape gained LBF's optional `ready` probe. Re-copied; sha1 `fccba6c4…` in all three.**
+
+**Qobuz + Tidal + Deezer + Spotify (via Spotty)** (Bandcamp not ported — manual/loop-blocking). **The paragraphs below predate the `rebuild` field**: where they say "reattached per service by `_svc`" or name an elsif branch, read "the adapter's own `rebuild` coderef". Priorities on
 the settings page (`svc_priority_qobuz|tidal|deezer`; 0 = never; lower = searched
 first). **The subtle bit — album nodes carry a CODEREF `url` that Storable can't
 serialise, so it's stripped on cache and reattached per service on read:**
