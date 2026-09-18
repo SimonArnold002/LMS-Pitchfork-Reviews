@@ -1714,6 +1714,9 @@ sub _reviewRow {
         # render, so every already-cached match gets the smaller picture immediately,
         # with no pfr:stream cache-version bump and no re-resolve of anything.
         $row{image} = _fitCover($al->{_cover} || $it->{cover} || $al->{image}) || DIVIDER_ICON;
+        # The matched service as Material's badge over the artwork (see _extid).
+        my $extid = $row{extid} // _extid($al);
+        $row{extid} = $extid if defined $extid;
         # Keep it playable from the list, but make the drill-in also carry the review
         # link (the row was purely the album node before, so tapping went straight to
         # the tracklist and the "Read the full review" link was unreachable).
@@ -1733,6 +1736,20 @@ sub _reviewRow {
         # can draw its dividers (see reviewDetail).
         passthrough => [ $it, { headers => ($headers ? 1 : 0) } ],
     };
+}
+
+# Material's service badge for a matched album node (Simon, 2026-09-18). Material draws an
+# emblem over a row's artwork from `extid`, reading only the part before the first ':' and
+# looking it up in its misc/emblems.json, whose keys for our four adapters are their names
+# lowercased. The native album id rides along as '<svc>:album:<id>', the shape Material's
+# own streaming items use. A service that already set its own extid on the node keeps it
+# (the callers prefer it). An unmatched review row has no service, so it never gets one.
+my %EMBLEM = map { $_ => $_ } qw(qobuz tidal deezer spotify);
+sub _extid {
+    my ($al) = @_;
+    my $pfx = $EMBLEM{ lc($al->{_svc} // '') } or return undef;
+    my $id  = $al->{_albumid};
+    return defined $id && length $id ? "$pfx:album:$id" : "$pfx:";
 }
 
 # Wrap a matched album node's tracklist coderef so drilling into the album shows the
@@ -1806,6 +1823,8 @@ sub _attachReviewLink {
         $a{line2} = cstring($client, $rel ? 'PLUGIN_PITCHFORKREVIEWS_ALSO_RELEASED'
                                           : 'PLUGIN_PITCHFORKREVIEWS_ALSO_REVIEWED');
         $a{image} = _fitCover($a{_cover} || $a{image}) || DIVIDER_ICON;
+        my $extid = $a{extid} // _extid($alt);
+        $a{extid} = $extid if defined $extid;
         # STRIP THE DIRECT-PLAY AFFORDANCES, because this node is being injected into a
         # PLAYABLE container. The invariant stated at the top of this sub — every injected
         # item is non-audio — is what makes Play/Add on the review row act on the album the

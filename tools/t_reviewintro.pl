@@ -197,5 +197,40 @@ my $LINK = 'https://pitchfork.com/reviews/albums/x/';
     is('and PITCHFORK\'s side title',                $side->[2]{name}, 'Yaeji - EP2');
 }
 
+# --- 7. the matched service is Material's BADGE over the artwork (2026-09-18) ---------
+# Material draws a service emblem from `extid`, reading only the part before the first ':'
+# against its misc/emblems.json. A matched row carries the adapter name (`_svc`, capitalised)
+# and the native id (`_albumid`); an unmatched row has neither and must stay unbadged.
+{
+    my $ROW = \&Plugins::PitchforkReviews::Browse::_reviewRow;
+    my $rev = sub { { artist => 'Dijon', album => 'Baby', capsule => $CAP, link => $LINK, @_ } };
+    my $node = sub { { name => 'Baby', type => 'playlist', url => \&inner_hash, @_ } };
+
+    is('a Qobuz match: service + album id',
+       $ROW->(undef, $rev->(_album => $node->(_svc => 'Qobuz', _albumid => 'q42')))->{extid}, 'qobuz:album:q42');
+    is('a Spotify match likewise',
+       $ROW->(undef, $rev->(_album => $node->(_svc => 'Spotify', _albumid => '5g9')))->{extid}, 'spotify:album:5g9');
+    is('a match with no native id: the bare service',
+       $ROW->(undef, $rev->(_album => $node->(_svc => 'Deezer')))->{extid}, 'deezer:');
+    is('an extid the service set itself is kept',
+       $ROW->(undef, $rev->(_album => $node->(_svc => 'Tidal', _albumid => '7', extid => 'tidal:album:own')))->{extid},
+       'tidal:album:own');
+    ok('CONTROL: an UNMATCHED review row carries no extid',
+       !exists $ROW->(undef, $rev->())->{extid});
+    ok('CONTROL: an unknown adapter name carries no extid',
+       !exists $ROW->(undef, $rev->(_album => $node->(_svc => 'Nowhere', _albumid => '1')))->{extid});
+    my $it = $rev->(_album => $node->(_svc => 'Qobuz', _albumid => 'q42'));
+    $ROW->(undef, $it);
+    ok('the CACHED node is not written into', !exists $it->{_album}{extid});
+
+    my (undef, $out) = render({
+        capsule => $CAP, link => $LINK, artist => 'Yaeji',
+        _alt => [ { name => 'x', _sidetitle => 'EP2', _svc => 'Tidal', _albumid => 'b2', type => 'playlist', url => \&inner_hash },
+                  { name => 'y', _sidetitle => 'EP3', type => 'playlist', url => \&inner_hash } ],
+    });
+    is('a second release in the drill-in wears its own badge', $out->[2]{extid}, 'tidal:album:b2');
+    ok('CONTROL: an alt with no service carries none', !exists $out->[3]{extid});
+}
+
 printf "\n%d passed, %d failed\n", $p, $f;
 exit($f ? 1 : 0);
