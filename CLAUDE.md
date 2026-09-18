@@ -560,6 +560,18 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
+## Status: 1.0.1 — RENUMBER ONLY, no content change (dev built 2026-09-18)
+
+`main` was released and renumbered `1.0.0` (tag `v1.0.0`, commit `8bafde5`, "1.0.0 — the
+0.9.42 release, renumbered"). `dev` was still at 0.9.44 (committed+pushed as `9b49ffd`,
+the web-skin pass below) — below `main`'s new number — so `dev` is renumbered straight to
+`1.0.1` to sit above it. Same code as 0.9.44, nothing else touched: `install.xml` and
+`repo.xml` version bumped 0.9.44 → 1.0.1 (explicit, not a patch bump), zip rebuilt clean,
+sha recomputed and verified against the zip on disk. No `.pm` edited, so no cache-key bump
+(`pfr:stream` layer unchanged) and no `t_matchersync`/fleet-sync re-run needed. `t_webskin.pl`
+31/31 green (unchanged from the 0.9.44 run below). Uncommitted, per the standing rule — review
+gate, not shipped.
+
 ## Status: 0.9.44 — the old web skins (Default / Classic) (0.9.44 INSTALLED + CONFIRMED LIVE 2026-09-16 — plugins page v0.9.44, red headings served over HTTP; NOT reviewed, uncommitted)
 
 0.9.44 changes one thing: the heading TEXT is Pitchfork red (`#e8292e`), matching its rule — Simon asked, comparing it with LBF's coloured headings. `t_webskin.pl` 31 (pins the colour; fails on `#1a1a1a`). Simon also asked NOT to add a web-only score line: the old skins never print `line2`, and that is accepted as a skin limitation. Zip 26 entries, identical to the tree, sha `780698977bdb6b328251a4b3bb80ff20fb60aa38`.
