@@ -3,6 +3,22 @@
 All notable changes to **Pitchfork Reviews** are listed here.
 Versions follow `MAJOR.MINOR.PATCH`.
 
+## 1.0.1 — 2026-09-18
+
+Pitchfork Reviews now reads properly in LMS's own web skins, **Default** and **Classic**, not just
+in Material.
+
+### Improvements
+
+- **Section headings in the web skins.** The genre, week and section dividers now show as bold
+  headings, instead of a small copy of the plugin icon that opened the image file when clicked.
+- **Buttons that come back.** In Default and Classic, Refresh, the View toggle and choosing a
+  year now return you to the list you were on, instead of opening an empty page.
+- **Cleaner rows.** Plain text rows no longer get a blank album cover next to them, and a row's
+  picture is drawn next to its text.
+
+Material is unchanged.
+
 ## 1.0.0 — 2026-09-17
 
 Spotify joins as a fourth service, every review shows its Pitchfork score, and the review lists

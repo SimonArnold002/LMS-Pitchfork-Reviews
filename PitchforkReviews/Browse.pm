@@ -395,6 +395,15 @@ use constant HSA_TILE        => 'plugins/PitchforkReviews/html/images/menu-high-
 use constant YEAR_TILE       => 'plugins/PitchforkReviews/html/images/menu-best-albums-of-the-year.png';  # branded section cover
 use constant LOGO_ICON       => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIcon.png';          # Pitchfork round mark (full-colour raster) — marks the "Read the full review" link
 use constant HEADER_ICON     => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIcon_svg.png';      # divider/header icon — MUST be the `_svg.png` Material-recolour form: Material renders an icon on a header-basic divider ONLY for `_svg.png`/`_MTL_*` icons, NOT a plain .png (verified vs LBF, whose dividers use its _svg.png)
+# THE OLD WEB SKINS (Default / Classic) — see _webify. A divider there is a styled
+# heading (bold Pitchfork-red text over a rule in the same red), kept on ONE line because the skins run a
+# textarea's name through html_line_break. And the settings page must be linked
+# RELATIVE to the browse page (/<Skin>/plugins/pitchforkreviews/index.html): a bare
+# /plugins/… path is served in the SERVER's default skin, so Default and Classic opened
+# a Material-styled page, and Classic's template has no webroot-prefixed `link`.
+use constant WEB_DIV_STYLE     => 'font-weight:bold;font-size:1.15em;color:#e8292e;'
+                                . 'border-bottom:2px solid #e8292e;padding:12px 0 3px 0;margin:0 8px 2px 0';
+use constant WEB_SETTINGS_LINK => '../PitchforkReviews/settings.html';
 
 # ===========================================================================
 # Browse feeds
@@ -403,6 +412,14 @@ use constant HEADER_ICON     => 'plugins/PitchforkReviews/html/images/PitchforkR
 # Top-level app menu.
 sub topLevel {
     my ($client, $cb, $args) = @_;
+
+    # The web-skin pass (see _webify). Every web request enters here, and the wrapped
+    # children carry it to every level below.
+    my $isWeb = _webSkin($args);
+    if ($isWeb && ref $cb eq 'CODE') {
+        my $inner = $cb;
+        $cb = sub { $inner->(_webify($_[0])) };
+    }
 
     # All three source tiles share one grouped feed (fetchFeed, dispatched by
     # `source`): each groups into Material header dividers per the group_by pref.
@@ -441,7 +458,7 @@ sub topLevel {
             name    => cstring($client, 'PLUGIN_PITCHFORKREVIEWS_SETTINGS'),
             type    => 'link',
             image   => SETTINGS_ICON,
-            weblink => '/plugins/PitchforkReviews/settings.html',
+            weblink => ($isWeb ? WEB_SETTINGS_LINK : '/plugins/PitchforkReviews/settings.html'),
         },
     );
 
@@ -711,6 +728,7 @@ sub _sectionHeader {
         name  => $label,
         type  => $useH ? _headerType() : 'text',
         ($noIcon ? () : (image => HEADER_ICON)),
+        _div  => 1,   # a divider: the web pass draws it as a heading (Material never sees the key)
     };
     # KNOWN LIMITATION, deliberately left in place. @kids is a SNAPSHOT taken at build
     # time, so the drill-in serves the children as they were when this header was made.
@@ -1943,6 +1961,7 @@ sub reviewDetail {
                 name    => cstring($client, _linkLabel($it)),
                 type    => 'link',
                 weblink => $it->{link},
+                _webimg => LOGO_ICON,   # web skins only — see _webify
             };
         }
         push @rows, _sectionHeader($client, cstring($client, _detailSectionLabel($it)), $headers, \@rev, 1), @rev
@@ -1969,6 +1988,7 @@ sub _refreshMatchRow {
     return {
         name        => cstring($client, 'PLUGIN_PITCHFORKREVIEWS_REFRESH_MATCH'),
         type        => 'link',
+        _webimg     => REFRESH_ICON,   # web skins only — see _webify
         nextWindow  => 'refresh',
         passthrough => [ $it ],
         url         => sub {
@@ -2043,6 +2063,151 @@ sub _headerType {
     elsif ($ver =~ /^(\d+)\.(\d+)\.(\d+)/) { $useBasic = (($1 <=> 6) || ($2 <=> 4) || ($3 <=> 3)) >= 0 ? 1 : 0; }  # >= 6.4.3
     else                                   { $useBasic = 1; }                                       # dev/test build -> new type
     return $_headerTypeCache = $useBasic ? 'header-basic' : 'header';
+}
+
+# ===========================================================================
+# THE OLD WEB SKINS (Default / Classic) — ported from the sibling ListenBrainz
+# plugin (LBF 1.0.7–1.0.12, where each point below was found live).
+#
+# Those skins render the feed SERVER-SIDE through Slim::Web::XMLBrowser, which passes
+# isWeb at every level; the JSON/CLI path Material, Jive and the home shelves use
+# (Slim::Control::XMLBrowser) never does, so none of this reaches Material. One pass,
+# applied by topLevel and carried down by wrapping every child `url`:
+#
+#   1. A divider (tagged `_div` by _sectionHeader / _divHeader) arrives as `text` +
+#      the logo: Default draws that as a THUMBNAIL linking to the PNG, and Classic
+#      flips the whole page into gallery mode on one such row. It becomes a styled
+#      `textarea` heading — the only row type whose name is printed raw.
+#   2. Any other plain `text` row is `| html`-escaped and, in Default, given a
+#      placeholder album cover. It becomes an escaped `textarea`.
+#   3. An image-less LINK row also gets that placeholder cover; a row that names a
+#      `_webimg` gets it as its image here, and only here.
+#   4. The web skins have no `nextWindow`: a Refresh / View / Sort / year pick opened a
+#      sub-page repeating the list. An EMPTY answer from such a row becomes
+#      _webBounce, which sends the browser back to the page the row was on
+#      ('refresh') or the one above ('parent').
+# `feedMode` is accepted as well as isWeb: a web skin fetches an itemActions row as a
+# CLI request (no isWeb) carrying feedMode:1. This plugin has no such rows today; the
+# check costs nothing and keeps the two plugins' rule identical.
+# ===========================================================================
+sub _webSkin {
+    my ($args) = @_;
+    return 0 unless ref $args eq 'HASH';
+    return 1 if $args->{isWeb};
+    return (ref $args->{params} eq 'HASH' && defined $args->{params}{feedMode}) ? 1 : 0;
+}
+
+sub _escHtml {
+    my ($s) = @_;
+    return '' unless defined $s;
+    $s =~ s/&/&amp;/g;
+    $s =~ s/</&lt;/g;
+    $s =~ s/>/&gt;/g;
+    $s =~ s/"/&quot;/g;
+    return $s;
+}
+
+sub _webify {
+    my ($data) = @_;
+    my $items = ref $data eq 'HASH' ? $data->{items} : ref $data eq 'ARRAY' ? $data : undef;
+    return $data unless ref $items eq 'ARRAY';
+    my @out = map { _webifyItem($_) } @$items;
+    return ref $data eq 'HASH' ? { %$data, items => \@out } : \@out;
+}
+
+sub _webifyItem {
+    my ($it) = @_;
+    return $it unless ref $it eq 'HASH';
+    my %i = %$it;
+    my $type = $i{type} // '';
+
+    if (delete $i{_div}) {
+        # Only the non-header form: a Material header never reaches a web skin, and a
+        # client that asked for headers keeps them untouched.
+        if ($type eq 'text') {
+            $i{name} = '<div style="' . WEB_DIV_STYLE . '">' . _escHtml($i{name}) . '</div>';
+            $i{type} = 'textarea';
+            delete @i{qw(image url passthrough)};
+            return \%i;
+        }
+    }
+
+    if (my $img = delete $i{_webimg}) {
+        $i{image} = $img unless $i{image};
+    }
+
+    if ($type eq 'text' && !defined $i{url}) {
+        my $name = _escHtml($i{name} // '');
+        if (my $src = _webImageSrc($i{image})) {
+            $name = '<div style="display:flex;align-items:center">'
+                  . '<img src="' . _escHtml($src) . '" alt="" '
+                  . 'style="width:64px;height:64px;object-fit:cover;margin:2px 10px 2px 0">'
+                  . "<div>$name</div></div>";
+        }
+        delete $i{image};
+        $i{type} = 'textarea';
+        $i{name} = $name;
+    }
+
+    if (ref $i{url} eq 'CODE') {
+        my $orig = $i{url};
+        my $nw   = $i{nextWindow} // '';
+        $i{url} = sub {
+            my ($c, $cb, $a, @rest) = @_;
+            my %a = ref $a eq 'HASH' ? %$a : ();
+            $a{isWeb} = 1;
+            $orig->($c, sub {
+                my $d = shift;
+                if ($nw =~ /^(?:refresh|parent)$/ && _feedIsEmpty($d)) {
+                    $cb->(_webBounce($c, $nw eq 'parent' ? 2 : 1));
+                    return;
+                }
+                $cb->(_webify($d));
+            }, \%a, @rest);
+        };
+    }
+
+    $i{items} = _webify($i{items}) if ref $i{items} eq 'ARRAY';
+    return \%i;
+}
+
+sub _feedIsEmpty {
+    my ($d) = @_;
+    my $items = ref $d eq 'HASH' ? $d->{items} : ref $d eq 'ARRAY' ? $d : undef;
+    return !(ref $items eq 'ARRAY' && @$items);
+}
+
+# Remote art through the server's own image proxy (a local path is NOT proxied —
+# proxiedImage turns one into the no-artwork placeholder).
+sub _webImageSrc {
+    my ($img) = @_;
+    return undef unless defined $img && length $img;
+    if ($img =~ m{^https?://}i) {
+        return undef unless Slim::Web::ImageProxy->can('proxiedImage');
+        my $p = Slim::Web::ImageProxy::proxiedImage($img) or return undef;
+        $p =~ s/(\.\w+)$/_100x100_o$1/;
+        return $p =~ m{^/} ? $p : "/$p";
+    }
+    return $img =~ m{^/} ? $img : "/$img";
+}
+
+# The web skins' answer to nextWindow: a one-line page that sends the browser back
+# `$up` levels by dropping segments from the `index` parameter (which IS the position
+# in the tree). `pfrr` stops the browser serving the list it already holds; the feed
+# never reads it. Both skins browse in a frame, so the script runs.
+sub _webBounce {
+    my ($client, $up) = @_;
+    $up = 1 unless $up && $up > 0;
+    my $js = "(function(){var u=new URL(location.href),p=u.searchParams,"
+           . "i=(p.get('index')||'').split('.');i.splice(-$up,$up);"
+           . "if(i.length&&i[0]!=='')p.set('index',i.join('.'));else p.delete('index');"
+           . "p.set('pfrr',Date.now());location.replace(u.href);})();";
+    return { items => [{
+        type => 'textarea',
+        name => '<div style="padding:8px 0"><a href="javascript:history.back()">'
+              . _escHtml(cstring($client, 'PLUGIN_PITCHFORKREVIEWS_WEB_BACK')) . '</a></div>'
+              . "<script>$js</script>",
+    }], cachetime => 0 };
 }
 
 # Dispatch a review list to a layout mode: 'genre' (the default) groups under each
@@ -2123,7 +2288,7 @@ sub _groupToggle {
 # 'header' type, so carry a url returning that bucket's rows (ignored by header-basic).
 sub _divHeader {
     my ($client, $label, $divType, $headers, $rowsFor) = @_;
-    my $hdr = { name => $label, type => $divType, image => HEADER_ICON };
+    my $hdr = { name => $label, type => $divType, image => HEADER_ICON, _div => 1 };
     if ($headers) {
         $hdr->{url} = sub {
             my ($c, $cb) = @_;

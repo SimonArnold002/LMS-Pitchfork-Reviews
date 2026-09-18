@@ -63,6 +63,7 @@ because line numbers rot on the next edit.
 | The review score sits on `line2` BY DESIGN and must not move to `line1`/`name` (the LL label door); a year row would show a score if one existed, and nothing writes one | — | `IT IS ON `line2`, AND IT MUST NEVER MOVE` |
 | THE REVIEW-SCORE FEATURE (0.9.40–0.9.42) IS CLOSED — no follow-up work; bugs go through a normal review | — | `FEATURE CLOSED 2026-09-16 (Simon): "close this` |
 | `View: Score` needs no `_frozenOrder` (the score is fixed at parse, nothing warms it); PFR has no `index`/`quantity` mapping, so the rendered-rows drift class cannot arise; the `group_by` pref name is historical, kept to preserve stored choices | — | ``_frozenOrder` WAS CONSIDERED AND IS NOT NEEDED` |
+| Web skins (Default/Classic): ONE `_webify` pass from `topLevel` — `_div` dividers become styled textarea headings, text rows escaped textareas, `_webimg` icons, `_webBounce` for nextWindow, relative settings link; Material untouched. Ported from LBF 1.0.12 | A2 | `WEB SKINS GET ONE PASS` |
 
 **Two standing rules that kill most repeat findings:**
 
@@ -185,6 +186,30 @@ always with its reason, and those stay suppressed. The code a fix added is new a
   not reopen this** (I tried exactly that on 2026-09-16 with a label comp and was corrected).
   Where such a row does turn up, the intended behaviour is to **match by album title alone**,
   which the fleet matcher's pinned leniency already does. Nothing is owed.
+
+- **WEB SKINS GET ONE PASS — `_webSkin`, `_webify`, `_webifyItem`, `_webBounce`, the `_div` / `_webimg` row keys,
+  `WEB_DIV_STYLE`, `WEB_SETTINGS_LINK`. Simon, 2026-09-16; 0.9.43 INSTALLED + confirmed working on Default/Classic by Simon 2026-09-16; 0.9.44 (sha `78069897…`) turns the heading TEXT Pitchfork red too, at Simon's request (was #1a1a1a over the red rule); scores/line2 NOT shown on these skins and deliberately NOT moved into the name (the LL label door)
+  live.** Ported from the ListenBrainz plugin (LBF 1.0.7–1.0.12, where every point was found live and signed off). The
+  old skins render server-side via `Slim::Web::XMLBrowser` (isWeb at every level); Material's JSON path never sets it,
+  so nothing here reaches Material. `topLevel` wraps its callback in `_webify` and every child `url` is wrapped
+  recursively, so no feed builder knows about the web skins:
+  - **Dividers** (`_sectionHeader`, `_divHeader` tag `_div`) arrive as `text` + the logo — a thumbnail linking to the PNG
+    in Default, a whole-page gallery flip in Classic. They become bold `textarea` headings over a Pitchfork-red rule.
+    **A different mechanism from LBF's, deliberately:** LBF threads `$isWeb` into each constructor; here a private key
+    avoids plumbing `$isWeb` through five feeds. Not a matcher sub, so no sync obligation.
+  - **Plain `text` rows** (capsule, genre, the service tail) are `| html`-escaped and given a placeholder cover in Default
+    → escaped `textarea`. **Image-less link rows** (Refresh streaming match, Read the full review) name a `_webimg`,
+    applied on the web only.
+  - **No `nextWindow` on the web skins** — an EMPTY answer from a refresh/parent row becomes `_webBounce` (a textarea
+    whose script drops 1 or 2 `index` segments; both skins browse in a frame, so it runs). A non-empty answer is shown.
+  - **Settings** links RELATIVE (`../PitchforkReviews/settings.html`): a bare `/plugins/…` path is served in the server's
+    default skin (Material), and Classic's template has no webroot-prefixed `link`.
+  - **The three `pfr-*_MTL_icon_*.png` were redrawn** as near-black (`#1a1a1a`) Material glyphs on transparent — `sort`
+    was an opaque white square. Material never shows them (it uses its own font icon for any `MTL_icon_` name).
+  - **No paging and no "Read more" exist in this plugin**, so LBF's two remaining fixes have nothing to apply to. No
+    Options-closing heading is needed either: every Options block here is followed by a divider or a list header.
+  - **Classic losing row covers is ACCEPTED**, as in LBF (the divider was the only thing setting its gallery mode).
+  Guard: `tools/t_webskin.pl` (30, every web assertion paired with a Material control), anti-tested six ways.
 
 ### B. KNOWN-OPEN AND ACCEPTED — do not re-report as new
 
@@ -534,6 +559,29 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 1.0.1 — RENUMBER ONLY, no content change (dev built 2026-09-18)
+
+`main` was released and renumbered `1.0.0` (tag `v1.0.0`, commit `8bafde5`, "1.0.0 — the
+0.9.42 release, renumbered"). `dev` was still at 0.9.44 (committed+pushed as `9b49ffd`,
+the web-skin pass below) — below `main`'s new number — so `dev` is renumbered straight to
+`1.0.1` to sit above it. Same code as 0.9.44, nothing else touched: `install.xml` and
+`repo.xml` version bumped 0.9.44 → 1.0.1 (explicit, not a patch bump), zip rebuilt clean,
+sha recomputed and verified against the zip on disk. No `.pm` edited, so no cache-key bump
+(`pfr:stream` layer unchanged) and no `t_matchersync`/fleet-sync re-run needed. `t_webskin.pl`
+31/31 green (unchanged from the 0.9.44 run below). Uncommitted, per the standing rule — review
+gate, not shipped.
+
+## Status: 0.9.44 — the old web skins (Default / Classic) (0.9.44 INSTALLED + CONFIRMED LIVE 2026-09-16 — plugins page v0.9.44, red headings served over HTTP; NOT reviewed, uncommitted)
+
+0.9.44 changes one thing: the heading TEXT is Pitchfork red (`#e8292e`), matching its rule — Simon asked, comparing it with LBF's coloured headings. `t_webskin.pl` 31 (pins the colour; fails on `#1a1a1a`). Simon also asked NOT to add a web-only score line: the old skins never print `line2`, and that is accepted as a skin limitation. Zip 26 entries, identical to the tree, sha `780698977bdb6b328251a4b3bb80ff20fb60aa38`.
+
+
+The ListenBrainz plugin's web-skin pass, ported. Full record and decisions: Ledger §A2 `WEB SKINS GET ONE PASS`.
+`install.xml` / `repo.xml` 0.9.43, zip rebuilt (26 entries) and diffed identical to the tree, `tools/t_webskin.pl`
+30/30 against the extracted copy. All 16 suites exit 0; both fleet sync checks 0. No cache or key version moved
+(render-only). `CHANGELOG.md` untouched (merge to main). **What to check live:** a list in each View mode, a review
+page (matched and unmatched), Refresh / View / year pick bouncing back, and Settings opening in the same skin.
 
 ## Status: 0.9.42 — a flat "View: Score" list, highest first (INSTALLED + VERIFIED LIVE, REVIEW CLOSED + PUSHED 2026-09-16)
 **REVIEWED 2026-09-16 on `dev` (`9b60d25` → `4e31b9f`, plus this ledger edit): NO FINDINGS, round closed, pushed to `origin/dev` at Simon's word.** Checked and held: `_groupedRows` dispatch is total with the same genre fallback as `_groupBy`; no reader of the retired `GROUPED_BY` token; the count appears once (header, not title); `_scoreOrdered` ties break newest-first on ISO text, unscored rows sink rather than drop, a real 0.0 stays above them, and the numeric guard is `_scoreLabel`'s. Suites `t_score` 61, `t_grouptoggle` 40, `t_sections` 46, `t_yearlist` 137, all green. Suppressed by the index, not cleared: line2 placement, no `_frozenOrder`, the `group_by` name.

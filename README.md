@@ -2,7 +2,7 @@
 
 Browse curated album reviews inside **Lyrion Music Server (LMS)** and play the reviewed album straight from your **streaming library** — one tap to play or add to the queue. Reviews come from **Pitchfork** (Best New Music, High Scoring Albums, Latest Reviews + the annual Best Albums of the Year countdown); each one is matched to a directly-playable album on **Qobuz, Tidal, Deezer or Spotify**, with the service's own artwork.
 
-Tested on LMS 9.x with the **Material Skin** (the classic skin works for the basics).
+Tested on LMS 9.x with the **Material Skin**. The web skins, **Default** and **Classic**, work too: you can browse, play and refresh there, with proper section headings.
 
 ---
 
@@ -36,7 +36,7 @@ Tested on LMS 9.x with the **Material Skin** (the classic skin works for the bas
 
 ## Requirements
 
-- **Lyrion Music Server 9.0.0+** (tested with the Material Skin; the classic skin covers browse/play).
+- **Lyrion Music Server 9.0.0+** (tested with the Material Skin; Default and Classic cover browse, play and refresh).
 - For playback, at least one matching streaming plugin installed and signed in: **Qobuz**, **Tidal**, **Deezer** and/or **Spotty** (Spotify).
 - **Pure Perl, cached, no extra server software** — no image libraries or external tools required, so it runs the same on a Raspberry Pi or a NAS.
 
