@@ -106,6 +106,10 @@ PLUGIN_PITCHFORKREVIEWS_REFRESH_MATCH
 	EN	Refresh streaming match
 	NL	Ververs streaming match
 
+PLUGIN_PITCHFORKREVIEWS_WEB_BACK
+	EN	Updated — back to the list
+	NL	Bijgewerkt — terug naar de lijst
+
 PLUGIN_PITCHFORKREVIEWS_WEEK_OF
 	EN	Week of
 	NL	Week van
