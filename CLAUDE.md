@@ -213,7 +213,7 @@ always with its reason, and those stay suppressed. The code a fix added is new a
   Guard: `tools/t_webskin.pl` (30, every web assertion paired with a Material control), anti-tested six ways.
 
 - **THE MATCHED SERVICE IS A BADGE — `_extid`, `%EMBLEM`, `extid` on `_reviewRow`'s matched row and on
-  `_attachReviewLink`'s alt rows. Simon, 2026-09-18. BUILT 1.0.2, not installed.** Material (upstream `d3f1d9227`) draws a
+  `_attachReviewLink`'s alt rows. Simon, 2026-09-18. BUILT 1.0.2, INSTALLED, badge VERIFIED LIVE 2026-09-18.** Needs a Material with upstream `d3f1d9227`: tested on a 6.4.9.1 build made from upstream `master` (`mkrel.py 6.4.9.1 --nocheck`), since no official release has it yet. Material (upstream `d3f1d9227`) draws a
   service emblem over a SlimBrowse row's artwork from `extid`, reading only the part before the first `:` against its
   `misc/emblems.json`. A matched row gets `<svc>:album:<_albumid>` (bare `<svc>:` with no id), `<svc>` being `_svc`
   lowercased: qobuz, tidal, deezer, spotify, all four Material keys. An extid the service set on its own node wins.
@@ -224,9 +224,6 @@ always with its reason, and those stay suppressed. The code a fix added is new a
   Guard: `tools/t_reviewintro.pl` §7 (9, incl. 3 controls), anti-tested twice (no badge: 4 red; alt badge only: 1 red).
 
 ### B. KNOWN-OPEN AND ACCEPTED — do not re-report as new
-
-- **The `extid` service badge is UNVERIFIED LIVE.** It needs a Material release containing `d3f1d9227`; until then
-  nothing renders and nothing breaks. Check on the first such release, then drop this line.
 
 - **A stale `%UNAVAIL_SINCE` record is NOT a defect — "Refresh streaming match" clears it
   (withdrawn 0.9.32 review).** Raised as: the record is cleared only by `_svcHasHandler`, so
@@ -575,13 +572,13 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: 1.0.2 — the matched service as Material's badge (dev built 2026-09-18, NOT INSTALLED)
+## Status: 1.0.2 — the matched service as Material's badge (dev built 2026-09-18, INSTALLED, badge VERIFIED LIVE)
 
 A matched review row, and each second release in its drill-in, carries `extid` (`Browse::_extid`, from `_svc` +
 `_albumid`), which Material (upstream `d3f1d9227`) draws as a service emblem over the artwork. Unmatched rows are
 unbadged. Line2 never named the service, so nothing was removed. No cache version bump: the row is built at render.
-`tools/t_reviewintro.pl` 36 → 45, anti-tested; all 16 suites green. Zip sha `9ab52b0c…`. The badge is UNVERIFIED LIVE
-until a Material release carries `d3f1d9227`. Ledger: §A2 `THE MATCHED SERVICE IS A BADGE`.
+`tools/t_reviewintro.pl` 36 → 45, anti-tested; all 16 suites green. Zip sha `9ab52b0c…`. The badge is VERIFIED LIVE
+(Simon, 2026-09-18). Ledger: §A2 `THE MATCHED SERVICE IS A BADGE`.
 
 ## Status: 1.0.1 — RENUMBER ONLY, no content change (dev built 2026-09-18)
 
