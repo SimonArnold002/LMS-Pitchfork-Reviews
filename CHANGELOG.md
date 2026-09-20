@@ -13,8 +13,8 @@ The streaming service a review plays from is now shown as a small badge on the a
   **Spotify** now carries that service's emblem on its cover, in the same place Material puts it on
   the service's own albums — on the review rows and on the alternative releases offered from an
   album page. A review with no match stays unbadged, and nothing else moved: the Pitchfork score
-  keeps its own line. Needs an up-to-date Material Skin; on an older one no badge is drawn and
-  nothing else changes.
+  keeps its own line. Needs **Material Skin 6.4.10** or later; on an older one no badge is drawn
+  and nothing else changes.
 
 ## 1.0.1 — 2026-09-18
 
