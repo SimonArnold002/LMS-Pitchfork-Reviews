@@ -213,7 +213,7 @@ always with its reason, and those stay suppressed. The code a fix added is new a
   Guard: `tools/t_webskin.pl` (30, every web assertion paired with a Material control), anti-tested six ways.
 
 - **THE MATCHED SERVICE IS A BADGE — `_extid`, `%EMBLEM`, `extid` on `_reviewRow`'s matched row and on
-  `_attachReviewLink`'s alt rows. Simon, 2026-09-18. BUILT 1.0.2, INSTALLED, badge VERIFIED LIVE 2026-09-18.** Needs a Material with upstream `d3f1d9227`: tested on a 6.4.9.1 build made from upstream `master` (`mkrel.py 6.4.9.1 --nocheck`), since no official release has it yet. Material (upstream `d3f1d9227`) draws a
+  `_attachReviewLink`'s alt rows. Simon, 2026-09-18. BUILT 1.0.2, INSTALLED, badge VERIFIED LIVE 2026-09-18.** Needs **Material 6.4.10 or later**, the first official release carrying upstream `d3f1d9227` (Simon, 2026-09-20); it was first tested on a 6.4.9.1 build made from upstream `master` (`mkrel.py 6.4.9.1 --nocheck`), before any release had it. Material (upstream `d3f1d9227`) draws a
   service emblem over a SlimBrowse row's artwork from `extid`, reading only the part before the first `:` against its
   `misc/emblems.json`. A matched row gets `<svc>:album:<_albumid>` (bare `<svc>:` with no id), `<svc>` being `_svc`
   lowercased: qobuz, tidal, deezer, spotify, all four Material keys. An extid the service set on its own node wins.
