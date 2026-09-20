@@ -3,6 +3,19 @@
 All notable changes to **Pitchfork Reviews** are listed here.
 Versions follow `MAJOR.MINOR.PATCH`.
 
+## 1.0.2 — 2026-09-20
+
+The streaming service a review plays from is now shown as a small badge on the album artwork.
+
+### Improvements
+
+- **The matched service shows as a badge.** A review matched to **Qobuz**, **Tidal**, **Deezer** or
+  **Spotify** now carries that service's emblem on its cover, in the same place Material puts it on
+  the service's own albums — on the review rows and on the alternative releases offered from an
+  album page. A review with no match stays unbadged, and nothing else moved: the Pitchfork score
+  keeps its own line. Needs an up-to-date Material Skin; on an older one no badge is drawn and
+  nothing else changes.
+
 ## 1.0.1 — 2026-09-18
 
 Pitchfork Reviews now reads properly in LMS's own web skins, **Default** and **Classic**, not just
