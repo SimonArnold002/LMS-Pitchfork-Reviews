@@ -165,6 +165,17 @@ print "--- detail page: a same-titled single and album say which is which (1.0.7
     is('CONTROL: the same label on two services gets no word', $t[0]{line2} . '|' . $t[1]{line2},
        'Troye Sivan (2026)|Troye Sivan (2026)');
 
+    # 1.0.8 (code review of 1.0.7, finding 2): a pair with NO line2 gets the word alone — never
+    # " · Single", a subtitle that starts with a dot. No live renderer leaves line2 unset (Deezer's
+    # `_renderAlbum` sets the artist name), so this pins `_sizeLine2`, not a field case.
+    my %bare = (name => "Troye Sivan - She's the Best", type => 'playlist', _svc => 'Deezer');
+    my @b = grep { ($_->{_svc} // '') eq 'Deezer' } detail($REVIEW,
+        [ { %bare, _size => 'album' }, { %bare, _size => 'single' } ], 1);
+    is('no line2: the word alone, no leading separator', join('|', map { $_->{line2} // '' } @b),
+       'Album|Single');
+    is('an empty line2 the same',  join('|', map { $_->{line2} // '' } grep { ($_->{_svc} // '') eq 'Deezer' }
+        detail($REVIEW, [ { %bare, line2 => '', _size => 'album' }, { %bare, line2 => '', _size => 'single' } ], 1)),
+       'Album|Single');
 }
 
 print "--- detail page: an empty Streaming section is omitted, not shown empty ---\n";

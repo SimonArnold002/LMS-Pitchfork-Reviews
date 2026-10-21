@@ -60,6 +60,8 @@ because line numbers rot on the next edit.
 | Code review of 1.0.4: `_singleStandIn` stand-in held 1 d (FIXED, BUILT 1.0.5); `$resolve` priority-first vs size (DECLINED, Simon "leave it"); `_releaseAlts` edition offered by size and `_reviewIsEp` on derived titles — verified in code, NO WRITER (68 live rows, 633-title corpus), not fixed | Status 1.0.4 | `CODE REVIEW 2026-10-21 (Simon: "/code-review of PFR")` |
 | Code review of 1.0.5: retry log line said "loose" for an exact single (FIXED, `_retryReason`); stand-in cost comment 2 vs 2 x N (FIXED); lower-service stand-in untested (PINNED) — fix records, not suppressions | Status 1.0.6 | `CODE REVIEW OF 1.0.5 2026-10-21` |
 | Code review of 1.0.6: reviewDetail same-titled pair (FIXED, `_sizeLabelSameTitled`, a 1.0.3 regression — the 1.0.3 "reached only by an unmatched row" line was WRONG); `_retryReason` untitled + debug-off cost (FIXED); `_wantsTitleRetry` "only two" comment (FIXED); 3e `$standIn` walk (PINNED) — fix records, not suppressions | Status 1.0.7 | `CODE REVIEW OF 1.0.6 2026-10-21` |
+| Code review of 1.0.7: size-offered single vs LL's `artist\|album\|year` dedupe (DECLINED, Simon: LL treats singles and albums differently; LL not touched); `_sizeLabelSameTitled` empty line2 (NO WRITER, guarded via `_sizeLine2`); `_streamTtl` self-titled comment (FIXED); `_streamLabelKey` / `_sizeLine2` / `_leg1Shape` one copy each (FIXED) | Status 1.0.8 | `CODE REVIEW OF 1.0.7 2026-10-21` |
+| `_releaseAlts` size alt + Listen to Later dedupe key (`&a=`/`&al=`/`&y=` same as the album row) — DECLINED, LL-side, LL out of scope | B | `A SIZE-OFFERED SINGLE AND LISTEN TO LATER'S` |
 | `_reviewIsEp` on YEAR-END LIST entries (heading drops " EP"?) — CLEARED on evidence: list headings keep it (2024 Djrum, `t_yearlist`) | B | `A YEAR-END LIST ENTRY KEEPS` |
 | `_releaseAlts` size branch keys on (title, size), so a second same-titled single is not offered — NO WRITER; offering both would show identical rows | B | `_releaseAlts' SIZE BRANCH OFFERS ONE` |
 | `_reviewIsEp` on a review titled exactly `EP` (bare `ep`, Yaeji `EP/EP2` side) reads as an album review — NO WRITER, declined | B | `A REVIEW TITLED EXACTLY "EP" READS AS AN ALBUM` |
@@ -250,6 +252,17 @@ always with its reason, and those stay suppressed. The code a fix added is new a
   looking rows (the very thing 1.0.7 removed from reviewDetail); telling them apart needs the year on
   line2 or picking by date. Same class as `Status 1.0.4` item 3 (edition offered by size). Re-raise only
   with a named live row.
+- **A SIZE-OFFERED SINGLE AND LISTEN TO LATER'S DEDUPE KEY — `_releaseAlts` (`_altsize`), `_attachFavUrl`
+  `&a=`/`&al=`/`&y=`, LL `DB::_keyForRow`/`dedupeKey`. DECLINED 2026-10-21 (Simon, code review of 1.0.7,
+  finding 1): "it also should not bite as singles and albums are treated differently in LL" and "do not
+  touch LL at all for this review".** The worry: a same-titled single offered under its album (Troye
+  Sivan *She's the Best*, single Aug 2026, album Oct 2026) sends LL the same artist, title and year as
+  the album row, and LL's album-kind key is `artist|album|year`, so saving the second would answer
+  "already saved". Read in LL's `DB.pm` but NOT tested live; Simon's call is that LL's single/album
+  handling keeps them apart. **PFR has nothing to change:** `&al=`/`&y=` carry the service's own title
+  and year by design (§A2, 0.7.10), and altering them to separate the two would be lying to LL. Any
+  change belongs in LL, outside a PFR review. Re-raise only with a live LL add of the pair that was
+  refused.
 - **A REVIEW TITLED EXACTLY "EP" READS AS AN ALBUM REVIEW — NO WRITER, DECLINED (code review of
   1.0.5, finding 3, 2026-10-21).** `_reviewIsEp('EP')` is 0: `_norm` gives `ep`, the rule needs a
   space before it. `_stripFmt` does not fold a bare `ep` either, so the two AGREE — the title IS the
@@ -686,7 +699,40 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: 1.0.7 — the 1.0.6 code review's fixes (dev BUILT 2026-10-21, NOT installed, committed to dev)
+## Status: 1.0.8 — the 1.0.7 code review's fixes (dev BUILT 2026-10-21, committed to dev, NOT installed)
+
+**CODE REVIEW OF 1.0.7 2026-10-21 (Simon: "lets do a /code-review of pfr", then "verify and look to fix
+these"; LL out of scope: "do not touch LL at all for this review").** Scope: the three unpushed commits
+(`be1da4f`, `9991e86`, `f6d90d6`) + tree. Six findings. No change to what a row plays, no
+`STREAM_KEY_VERSION` bump (28): nothing cached changes meaning.
+1. **DECLINED (Simon) — a size-offered single vs LL's dedupe key.** §B `A SIZE-OFFERED SINGLE AND LISTEN
+   TO LATER'S`. LL not touched.
+2. **NO WRITER, guarded anyway: `_sizeLabelSameTitled` appended `" · Single"` to an undef line2.** Checked
+   upstream: Deezer's `_renderAlbum` (philippe44/lms-deezer master) sets `line2 => $item->{artist}{name}`,
+   and a Deezer row only reaches the list through `_albumMatches` with an artist, so no live row has an
+   empty line2. The new shared `_sizeLine2` (finding 5) joins only non-empty parts, so the guard costs
+   nothing. Pinned in `t_sections` (undef and `''` → `Album|Single`); anti-tested (old join, 2 fails).
+3. **FIXED (comment): `_streamTtl`'s stand-in note said the title was always searched.** A self-titled
+   review runs no title leg (`$wantAlbumLeg`: the artist search already was that search), so such a row
+   costs ONE search a day. The behaviour (1-day hold) was right. Pinned: self-titled stand-in → 1 query,
+   UNVALIDATED (`t_releaserank` 5d3).
+4. **FIXED: `_streamLabelKey`** — one (svc, name, line2) key, read by `_dedupeStreamItems` (plus `_size`)
+   and `_sizeLabelSameTitled`. Same string as before, so the existing pair tests are the guard.
+5. **FIXED: `_sizeLine2`** — one builder for the size word, used by `_attachReviewLink`'s size alt and
+   `_sizeLabelSameTitled`.
+6. **FIXED: `_leg1Shape`** — one classifier (untitled / settled / stand / loose) read by
+   `_wantsTitleRetry` and `_retryReason`. Same verdicts as before (all 1.0.6/1.0.7 `_retryReason`
+   assertions unchanged and green). `t_releaserank` 5d3: 8 shapes, each pinned on the retry AND on being
+   the shape's own verdict. Anti-tested: stand-in ignored 13 fails, never settles 28, untitled counted as
+   evidence 2.
+**Tests 1,444 -> 1,464, all 16 suites green (exit 0 each).**
+**Packaged (Simon: "build and commit"):** `install.xml`/`repo.xml` 1.0.8 (1.0.7 is installed); zip 26
+entries, 317,691 bytes; `repo.xml <sha>` `e80e28eed7a91f594b7cadf45fcea6143837a383`; unzipped `diff -r`
+identical to the tree; `t_releaserank`/`t_sections`/`t_reviewintro`/`t_perf` green against the extracted
+Browse.pm. No cache reset: nothing cached changes meaning. NOT installed. Live check owed: none new (the
+changes are refactors plus a guard no live row reaches); 1.0.7's item 1 is still owed.
+
+## Status: 1.0.7 — the 1.0.6 code review's fixes (dev BUILT 2026-10-21, committed to dev f6d90d6, INSTALLED 15:56 restart; item 1 live check OWED)
 
 **CODE REVIEW OF 1.0.6 2026-10-21 (Simon: "lets do another /code-review", then "verify and look to fix").**
 Scope `be1da4f` + `9991e86` (both unpushed), clean tree. Seven findings, each verified in code; the code
@@ -721,7 +767,15 @@ ones anti-tested on mutated scratch copies (`PFR_BROWSE=`). No change to what a 
 entries, 316,867 bytes; `repo.xml <sha>` `2b5807e09dffba5cc6d11390ef545a6f68a71f3a`; unzipped `diff -r`
 identical to the tree; `t_releaserank`/`t_sections`/`t_reviewintro`/`t_perf` green against the extracted
 Browse.pm. No cache reset: nothing cached changes meaning. This commit also carries the 1.0.6 build's
-committed content unchanged. Live check owed: item 1, on a row drawn past BUILD_DEADLINE.
+committed content unchanged.
+**Installed 2026-10-21 (LMS restart 15:56:54).** Read-only check over JSON-RPC (Dining Room, no play):
+Latest Reviews 35 rows; Troye *She's the Best* and @ *Autosmile* still matched (playlist rows); Troye's
+drill-in unchanged — capsule, link, `Another release with this name · Single`, Refresh, then the ALBUM's
+tracklist. **Item 1 NOT verified live:** reviewDetail with the pair needs a row drawn unmatched (past
+VIEW_DEADLINE 45 s on a list, BUILD_DEADLINE 10 s on a shelf) while both releases are cached, and a single
+row's stream entry cannot be emptied over HTTP (Refresh re-pulls the feed, not the matches). Check it on the
+next cold resolve that leaves Troye or Autosmile unmatched at render. The settings plugins page returned 403
+from here this session, so the loaded version was not read from it.
 
 ## Status: 1.0.6 — the 1.0.5 code review's fixes (dev BUILT 2026-10-21, NOT installed, committed to dev)
 

@@ -1180,6 +1180,37 @@ my $TROYE = "She's the Best";
     is('...and the retry still ran (two legs)', scalar(@QUERIES), 2);
 }
 {
+    # 1.0.8 (code review of 1.0.7, finding 6): `_wantsTitleRetry` and `_retryReason` read ONE
+    # classification (`_leg1Shape`), so the debug line cannot describe a different shape from the one
+    # that fired the retry. Each case pins the retry decision AND that it is exactly the shape's.
+    print "5d3. _leg1Shape — the retry and its wording share one classification\n";
+    my ($shape, $want) = ($B->can('_leg1Shape'), $B->can('_wantsTitleRetry'));
+    for my $c (
+        [ 'an exact album settles',              'Autosmile',    [ scand('Autosmile', 'album') ],          0 ],
+        [ 'an exact single stands in',           'Autosmile',    [ scand('Autosmile', 'single') ],         1 ],
+        [ 'loose only retries',                  'Autosmile',    [ scand('Autosmile (Live)', 'album') ],   1 ],
+        [ 'untitled only does not (no evidence)', 'Autosmile',   [ { name => 'x', _size => 'album' } ],    0 ],
+        [ 'a stand-in then the album settles',   'Autosmile',    [ scand('Autosmile', 'single'),
+                                                                   scand('Autosmile', 'album') ],          0 ],
+        [ 'loose + untitled retries',            'Autosmile',    [ scand('Autosmiles', 'album'), { name => 'x' } ], 1 ],
+        [ 'an unknown-size exact settles',       'Autosmile',    [ scand('Autosmile') ],                   0 ],
+        [ 'an EP review: an exact single settles', 'Autosmile EP', [ scand('Autosmile', 'single') ],       0 ],
+    ) {
+        my ($label, $album, $res, $exp) = @$c;
+        my $s = $shape->($album, $res);
+        is("retry: $label", $want->($album, $res), $exp);
+        is("...and it is the shape's own verdict",
+           ((!$s->{settled} && ($s->{stand} || $s->{loose})) ? 1 : 0), $exp);
+    }
+
+    # 1.0.8 (finding 3): a SELF-TITLED review runs no title leg — the artist search already was that
+    # search — so a stand-in single there costs ONE search, and is still held a day, not thirty.
+    my $UNVAL = $B->can('STREAM_UNVALIDATED_TTL')->();
+    resolve('Weezer', 'Weezer', Qobuz => { script => [ [ scand('Weezer', 'single', 'Weezer') ], [] ] });
+    is('self-titled stand-in: one query, no title leg', scalar(@QUERIES), 1);
+    is('...still held UNVALIDATED (re-checked daily)',  ttl_written(), $UNVAL);
+}
+{
     # 1.0.6 (code review of 1.0.5, finding 5): `_reviewIsEp` and `_stripFmt` must agree on what a
     # trailing EP is. `_stripFmt` is a FLEET matcher sub (pinned in matcher_sync_check.py), so
     # `_reviewIsEp` cannot share its code; the agreement is pinned here instead. If either learns a

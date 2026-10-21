@@ -1763,6 +1763,20 @@ my %ALT_SIZE_TOKEN = (single => 'PLUGIN_PITCHFORKREVIEWS_SIZE_SINGLE',
                       ep     => 'PLUGIN_PITCHFORKREVIEWS_SIZE_EP',
                       album  => 'PLUGIN_PITCHFORKREVIEWS_SIZE_ALBUM');
 
+# line2 with the release's size word on the end — "<line2> · Single". ONE builder for the two rows
+# that carry it, the size-offered alt (_attachReviewLink) and reviewDetail's same-titled pair
+# (_sizeLabelSameTitled), so they can never word one release differently (1.0.8, code review of
+# 1.0.7). undef when the size has no word, so a caller can tell "nothing to add". An empty line2
+# gets the word alone, never a leading " · " — no live row has one (Deezer's `_renderAlbum` sets
+# line2 to the artist name, and a row only survives `_albumMatches` with an artist), but a renderer
+# that leaves it unset must not produce a subtitle that starts with a dot.
+sub _sizeLine2 {
+    my ($client, $line2, $size) = @_;
+    my $tok = defined $size ? $ALT_SIZE_TOKEN{$size} : undef;
+    return undef unless $tok;
+    return join(" \x{b7} ", grep { defined && length } $line2, cstring($client, $tok));
+}
+
 # THE SAME WORD ON reviewDetail's STREAMING LIST (1.0.7, code review of 1.0.6 finding 1). Since
 # 1.0.3 `_dedupeStreamItems` keeps a single and its album that render identically (Qobuz labels
 # from artist + title + year), and reviewDetail lists every real match, so the pair showed as two
@@ -1773,16 +1787,14 @@ my %ALT_SIZE_TOKEN = (single => 'PLUGIN_PITCHFORKREVIEWS_SIZE_SINGLE',
 # list reads as before; on line2, never the label (the LL door, as for the alts). A COPY of each
 # row, never the node the resolver cached. A row of unknown size gets no word: the dedupe key
 # carries the size, so any pair it kept differs there, and one stated size is enough to tell them apart.
+# "Shares a label" is `_streamLabelKey`, the same key the dedupe uses minus the size (1.0.8).
 sub _sizeLabelSameTitled {
     my ($client, $items) = @_;
-    my $key = sub { join('|', $_[0]{_svc} // '', $_[0]{name} // '', $_[0]{line2} // '') };
     my %n;
-    $n{ $key->($_) }++ for @$items;
+    $n{ _streamLabelKey($_) }++ for @$items;
     return map {
-        my $tok = defined $_->{_size} && $ALT_SIZE_TOKEN{ $_->{_size} };
-        ($tok && $n{ $key->($_) } > 1)
-            ? { %$_, line2 => ($_->{line2} // '') . " \x{b7} " . cstring($client, $tok) }
-            : $_
+        my $l2 = $n{ _streamLabelKey($_) } > 1 ? _sizeLine2($client, $_->{line2}, $_->{_size}) : undef;
+        defined $l2 ? { %$_, line2 => $l2 } : $_
     } @$items;
 }
 
@@ -1859,8 +1871,10 @@ sub _attachReviewLink {
         # A release offered only because of its SIZE has the same title as the row above it
         # (1.0.3, `_altsize` — see _releaseAlts), so say which one it is. On line2, never the
         # label: a Spotify alt is `native_favurl`, and ListenLater stores its LABEL as the title.
-        $a{line2} .= " \x{b7} " . cstring($client, $ALT_SIZE_TOKEN{ $a{_altsize} })
-            if $rel && defined $a{_altsize} && $ALT_SIZE_TOKEN{ $a{_altsize} };
+        if ($rel) {
+            my $l2 = _sizeLine2($client, $a{line2}, $a{_altsize});
+            $a{line2} = $l2 if defined $l2;
+        }
         $a{image} = _fitCover($a{_cover} || $a{image}) || DIVIDER_ICON;
         my $extid = $a{extid} // _extid($alt);
         $a{extid} = $extid if defined $extid;
@@ -3362,34 +3376,44 @@ sub _wantsTitleRetry {
     my ($album, $res) = @_;
     return 0 unless defined $res && ref $res eq 'ARRAY';
     return 1 unless @$res;                                    # nothing found at all
-    my $stated = 0;
-    for my $it (@$res) {
-        # one exact is enough to settle — unless it is a single standing in for an album
-        return 0 if _exactFolded($album, $it) && !_singleStandIn($album, $it);
-        $stated++ if ref $it eq 'HASH' && defined $it->{_svctitle}
-                  && !ref $it->{_svctitle} && length $it->{_svctitle};
+    my $s = _leg1Shape($album, $res);
+    return 0 if $s->{settled};
+    return ($s->{stand} || $s->{loose}) ? 1 : 0;              # positive evidence, never untitled alone
+}
+
+# WHAT THE ARTIST LEG HELD, counted once, for the two readers that act on it (1.0.8, code review of
+# 1.0.7): `_wantsTitleRetry` decides on it and `_retryReason` words it, so the debug line can never
+# describe a different classification from the one that fired the retry — the 1.0.6 "loose" mislabel
+# class. Each candidate is exactly one of:
+#   untitled — states no title: no evidence either way (`_exactFolded` is 0 on it too)
+#   settled  — folded-exact and not a stand-in: the leg found the record, stop (returns at once)
+#   stand    — an exact single standing in for the album (`_singleStandIn`)
+#   loose    — titled, not exact
+sub _leg1Shape {
+    my ($album, $res) = @_;
+    my %s = (settled => 0, stand => 0, loose => 0, untitled => 0);
+    for my $it (@{ ref $res eq 'ARRAY' ? $res : [] }) {
+        my $t = ref $it eq 'HASH' ? $it->{_svctitle} : undef;
+        if    (!defined $t || ref $t || !length $t) { $s{untitled}++ }
+        elsif (_singleStandIn($album, $it))         { $s{stand}++ }
+        elsif (_exactFolded($album, $it))           { return { %s, settled => 1 } }
+        else                                        { $s{loose}++ }
     }
-    return $stated ? 1 : 0;
+    return \%s;
 }
 
 # What the artist leg held when `_wantsTitleRetry` fired, in the words the debug line uses: the
-# three shapes above, counted. Only reached on a retry with debug on (the call site gates it on
+# shapes `_leg1Shape` counts. Only reached on a retry with debug on (the call site gates it on
 # `_verbose`, since `_dbgv`'s own gate runs after its argument is built), and only for that line.
-# A candidate that states no title is "untitled", not loose — the distinction `_wantsTitleRetry`
-# draws (no evidence is not evidence). Every live adapter states one, so it is a stub's shape today.
+# A candidate that states no title is "untitled", not loose — no evidence is not evidence. Every live
+# adapter states one, so it is a stub's shape today.
 sub _retryReason {
     my ($album, $leg1) = @_;
     return 'no hit' unless ref $leg1 eq 'ARRAY' && @$leg1;
-    my ($stand, $loose, $untitled) = (0, 0, 0);
-    for my $it (@$leg1) {
-        my $t = ref $it eq 'HASH' ? $it->{_svctitle} : undef;
-        if    (!defined $t || ref $t || !length $t) { $untitled++ }
-        elsif (_singleStandIn($album, $it))         { $stand++ }
-        else                                        { $loose++ }
-    }
-    return join(' + ', ($stand    ? "$stand exact single(s) standing in for the album" : ()),
-                       ($loose    ? "$loose loose match(es)"                          : ()),
-                       ($untitled ? "$untitled untitled match(es)"                    : ()));
+    my $s = _leg1Shape($album, $leg1);
+    return join(' + ', ($s->{stand}    ? "$s->{stand} exact single(s) standing in for the album" : ()),
+                       ($s->{loose}    ? "$s->{loose} loose match(es)"                          : ()),
+                       ($s->{untitled} ? "$s->{untitled} untitled match(es)"                    : ()));
 }
 
 # Real service matches out of a _findPlayable answer. _streamResult NEVER returns an
@@ -3762,7 +3786,9 @@ sub _streamTtl {
     if ($nitems) {
         # A SINGLE STANDING IN FOR THE ALBUM STILL WON THE ROW (1.0.5). `_wantsTitleRetry` already
         # treats an exact single on an album review as evidence the album is MISSING, and searched
-        # the title for it; when that search found no album either, the single plays — but it is
+        # the title for it — except on a SELF-TITLED review, where no title leg runs because the
+        # artist search already was that search (`$wantAlbumLeg`), so that row costs ONE search a day,
+        # not two (1.0.8, code review of 1.0.7). When no album turned up, the single plays — but it is
         # the same state as a review that lands before the release (ledger, t_perf section 12): the
         # answer is expected to change, so it is held a day and the warm looks again. Pinned for
         # thirty days it was §B shape (a)'s cost surviving the 1.0.3 fix. Measured before it was
@@ -4473,11 +4499,21 @@ sub _cacheStream {
 # is '' on both sides, so without counts this collapses exactly what it did before. The pair it
 # now keeps is VISIBLE wherever a list of matches is drawn (reviewDetail), so it is labelled
 # there by size — `_sizeLabelSameTitled`.
+#
+# WHAT A ROW LOOKS LIKE on a service's list — service, label, subtitle. The dedupe adds the size to
+# it; `_sizeLabelSameTitled` counts on it alone to find the pairs the dedupe kept. One key for both
+# (1.0.8, code review of 1.0.7): two hand-kept copies would let a pair slip past the labeller
+# unannounced the day one of them gains a field.
+sub _streamLabelKey {
+    my ($it) = @_;
+    return join('|', $it->{_svc} // '', $it->{name} // '', $it->{line2} // '');
+}
+
 sub _dedupeStreamItems {
     my ($items) = @_;
     my (%seen, @out);
     for my $it (@{ $items || [] }) {
-        my $k = join('|', $it->{_svc} // '', $it->{name} // '', $it->{line2} // '', $it->{_size} // '');
+        my $k = _streamLabelKey($it) . '|' . ($it->{_size} // '');
         next if $seen{$k}++;
         push @out, $it;
     }
