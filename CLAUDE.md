@@ -56,6 +56,7 @@ because line numbers rot on the next edit.
 | The Refresh row is NOT defeated by a captured closure (withdrawn 0.9.28) | B | `The Refresh row is NOT defeated by a captured` |
 | `_wantsTitleRetry` will NOT be widened with `_matchExactness` (declined 0.9.29) | B | ``_wantsTitleRetry` will NOT be widened with` |
 | The Qobuz search payload's `release_type` availability is UNVERIFIED | B | `The Qobuz search payload's `release_type`` |
+| A title-track single takes the row from its album (2 of 68 live rows, 2026-10-21) — BUILT 1.0.3 (`_candSize` size on every match; `_rowPick`, `_dedupeStreamItems`, `_releaseAlts`, `_wantsTitleRetry` size-aware), INSTALLED + VERIFIED LIVE 2026-10-21; inline review the same day: two comment/placement fixes (built as 1.0.4), residuals stated in `## Status: 1.0.3` | B | `A TITLE-TRACK SINGLE TAKES THE ROW FROM ITS ALBUM` |
 | `_searchSpotify`: an errored Spotty search reads as a real miss (no zero-raw-results rule) | B | `_searchSpotify` TREATS AN EMPTY SPOTTY ANSWER` |
 | `_searchSpotify`: no `hasCredentials` branch; account stays keyed per service | B | `_searchSpotify` HAS NO `hasCredentials` BRANCH` |
 | `pace_warm`: warm backs off only while Spotify refuses (429); always-on pacing REJECTED as too slow | B | `PACED_WARM_GAP` / `pace_warm`: THE WARM RUNS AT FULL WIDTH` |
@@ -297,6 +298,69 @@ always with its reason, and those stay suppressed. The code a fix added is new a
   probed from a dev Mac. Deezer (`record_type`, live-verified) and Tidal (`type`, from
   `API/Async.pm` passing search items through untouched) do carry one. Nothing in the
   plugin depends on this today; it would need a one-off `_dbgv` key dump first.
+  **Source read 2026-10-21 (plugin-Qobuz master, 3.7.3), not a payload observation:**
+  `API::search` runs `catalog/search` albums through `_precacheAlbum`, whose delete list
+  keeps `tracks_count`, `duration` and `release_type` (it copies `release_type` into its
+  own albumInfo). The plugin's artist page classifies album-list items by `duration >= 1800
+  || tracks_count > 6` / `tracks_count < 4` (Plugin.pm, `$groupByReleaseType`), so those two
+  fields are real in the album-list shape. **`release_date_original` IS deleted**, so
+  `_svcYear`'s first Qobuz field never arrives and the year comes from `released_at`. Also:
+  the plugin caches a search 300 s under `search_<query>_<type>_0`, with no limit in the key.
+  **`tracks_count` IS in the search payload — observed live 2026-10-21 through 1.0.3** (`_candSize` on
+  the raw search hash drives 7 live size offers). `release_type` itself is still unobserved and unread.
+- **A TITLE-TRACK SINGLE TAKES THE ROW FROM ITS ALBUM — `$resolve`'s exact promotion,
+  `_wantsTitleRetry`, `_releaseAlts`, `_exactFolded`. FOUND 2026-10-21 (Simon's report), OPEN,
+  no decision yet.** Live, read-only (Dining Room browse, paced): 68 Qobuz-matched rows across
+  the three review feeds, **2 play a 1-track single where the review is of the album**:
+  *@ – Autosmile* (Single, 1 track, 24 Jun; album 11 tracks, 16 Oct = review day) and
+  *Troye Sivan – She's the Best* (Single, 1 track, 14 Aug; album 12 tracks, 9 Oct; the capsule
+  says "fourth album"). Same title both sides, so `_releaseKey` cannot separate them (the
+  residual gap `_releaseAlts` documents) and `_releaseAlts` offers nothing either. Two shapes:
+  (a) **the album is not a candidate at all.** Qobuz's artist search for "@" on 17 Oct returned
+  the single in its top 60 and not the album; on 21 Oct it returned both (album 17, single 20).
+  The single is folded-exact, so `_wantsTitleRetry` returns 0 and the title leg (which on 17 Oct
+  DID return the album, at 1) never runs; the single is then held `STREAM_FOUND_TTL` (30 d).
+  (b) **both are candidates, single first** (Troye: single 7, album 21); both exact, so the
+  promotion moves nothing. The three EP rows (Deafheaven 3 tracks/23 min, Stevie Wonder 4,
+  Zach Bryan 8) are right. **A count-only rule is WRONG here:** SML – Spontaneous Music Live
+  (2 tracks, 48 min) and Oren Ambarchi – Cooked (2 tracks, 43 min) are albums, so duration has to
+  be part of any size test. Crawl script: session scratchpad `pfr_sizecrawl.py`.
+  **What already exists, and none of it is in PFR:** PFR's only single/album rule is 0.9.27's,
+  which is by TITLE, so it cannot split a same-titled pair. LBF's `_candReleaseType` drops by
+  TYPE and was declined here (above). **Discography's `_candSize` + `_sizeFromCounts`
+  (`Sources.pm`) is the size classifier to port**: counts first (Qobuz `tracks_count`, TIDAL
+  `numberOfTracks`, Deezer `nb_tracks`) with duration (30+ min or more than 6 tracks = album,
+  under 4 = single, else EP: the Qobuz plugin's own rule), a stated type only when there are no
+  counts, and Qobuz `release_type` NOT read (DSC 0.46.8: unreliable). Its comment records Qobuz
+  search items carrying `tracks_count`/`duration` as verified live. Neither sub is in
+  `matcher_sync_check.py`, so a port is call-site logic, not a fleet matcher change.
+  **What Pitchfork states, measured 2026-10-21 on four review pages** (Autosmile, She's the Best,
+  Deafheaven EP, Zach Bryan EP; `transformed.review.headerProps` + `multiReviewHeaderProps`):
+  NO format field. Every one has `rubric` "Albums", `isTrackReview` false, `infoSliceFields`
+  {genre, label, reviewDate, releaseYear}, and `itemsReviewed[].{albumId, dangerousHed,
+  publisher, releaseYear}`. The ONLY marker is the headline: an EP is `<em>Title</em> EP` (the
+  word OUTSIDE the italics), an album is `<em>Title</em>`. Singles are reviewed under Tracks
+  (`isTrackReview`), which PFR never reads (`REVIEWS_URL` is `/reviews/albums/`). So every PFR
+  review is, by Pitchfork's own filing, an album or an EP, never a single.
+  **The existing offer is blind to this pair:** She's the Best's drill-in (2026-10-21) shows no
+  `PLUGIN_PITCHFORKREVIEWS_ALSO_RELEASED` row although the album was a candidate, because
+  `_releaseAlts` dedupes on `_releaseKey` and the two titles are identical.
+  **DECIDED AND BUILT 2026-10-21, 1.0.3 (Simon: "if there is two candidates then it should offer
+  them … build a test version").** Full record: `## Status: 1.0.3`. In one line: every match carries
+  Discography's size (`_candSize`), and among EXACT titles the row takes the first non-single
+  unless Pitchfork's title says EP; the other size is offered; an exact single alone fires the
+  title leg once. Nothing is ever dropped (the 0.9.27 decision above stands), and a size the
+  service did not state changes nothing anywhere. **Simon, same day: Autosmile's shape (a) was
+  QOBUZ's fault** — its artist search for "@" failed until his support request got it fixed —
+  so the retry is a guard for the next such outage, not the Autosmile fix. **A FOURTH CARRIER WAS
+  FOUND BY THE SUITE, NOT BY READING:** `_dedupeStreamItems` keyed on the service's display text,
+  and Qobuz's `_albumItem` labels from artist + title + year only, so the single and the album
+  were ONE row and the album was discarded before any ranking ran. **UNVERIFIED LIVE: whether
+  Qobuz SEARCH rows carry `tracks_count`/`duration`** (DSC says verified live; LBF 0.9.143 says
+  absent; memory `streaming-service-apis` marks it CONTESTED). If they do not, `_size` is undef
+  on Qobuz and 1.0.3 behaves exactly as 1.0.2 — the Troye row after install is the test. **SETTLED
+  LIVE the same day: they do** (Troye moved to the album; 7 rows offer a same-titled single — see
+  `## Status: 1.0.3`).
 - **`_searchSpotify` TREATS AN EMPTY SPOTTY ANSWER AS A REAL MISS — deliberate (Spotify adapter,
   2026-09-15).** Spotty's Pipeline swallows API errors into an empty arrayref (verified in the
   ListenBrainz repo's `docs/spotify-spotty-adapter-pr17.md`), so an outage is indistinguishable from
@@ -386,6 +450,12 @@ decisions below (e.g. "Do not propose restoring") stay suppressed for their stat
   Leading with leg 2 is what pinned a wrong release for thirty days whenever NEITHER leg was
   exact (the promotion is a no-op there, so order became the adjudicator). Both directions
   are pinned by sections 3c and 3d.
+  **AMENDED 1.0.3 (2026-10-21): the proof changed, the conclusion did not.** `_wantsTitleRetry` now
+  also fires when leg 1's only exact candidates are SINGLE-sized (the Autosmile case), so `@leg1` can
+  reach the merge holding exact singles. Leading with leg 1 is still right: `_rowPick` passes over an
+  exact single to leg 2's exact non-single wherever it sits, and with no exact non-single the single
+  keeps the row exactly as before. Pinned by `t_releaserank.pl` §5d (Autosmile: two legs, the album
+  takes the row, the single kept behind it).
 
 - **A SERVICE LEG'S OUTCOME HAS EXACTLY ONE CARRIER — `@outcome` (0.9.32). A SIXTH BOOLEAN
   IS THE BUG, NOT THE FIX.** This is the invariant that ends the 0.9.28→0.9.31 recurrence, so
@@ -485,8 +555,8 @@ transcript will be rediscovered as a finding within days.
 - **Material home shelves** — Best New Music, High Scoring Albums and Latest Reviews as scrollable rows on the Material home page.
 - **Add to Listen Later** — matched albums carry what the companion *Listen Later* plugin needs to save & replay them.
 - **Dutch** — the whole plugin is translated, so an LMS set to Dutch reads in Dutch throughout.
-- **Smart matching** — folds stylised spellings (*WOR$T* = *Worst*, *P!nk* = *Pink*) and a trailing EP/LP so more reviews resolve to a playable album; where an artist has an album and a single sharing a name, the reviewed record wins the row.
-- **Not the right album? Change it** — when a service carries another release under the same name, it's offered right there on the album page, alongside a Refresh that re-searches from scratch.
+- **Smart matching** — folds stylised spellings (*WOR$T* = *Worst*, *P!nk* = *Pink*) and a trailing EP/LP so more reviews resolve to a playable album; where an artist has an album and a single sharing a name — even an identical one — the album wins the row, because Pitchfork only reviews albums and EPs.
+- **Not the right album? Change it** — when a service carries another release under the same name, it's offered right there on the album page (marked *Single*, *EP* or *Album* when the titles are identical), alongside a Refresh that re-searches from scratch.
 
 **Requirements:** LMS 9.0.0+ (Material Skin recommended; the classic skin covers browse/play). For playback, at least one of **Qobuz / Tidal / Deezer** installed and signed in. **Pure Perl, cached, no extra server software** — runs the same on a Raspberry Pi or a NAS. Every streaming integration is optional and degrades gracefully.
 
@@ -571,6 +641,116 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 1.0.4 — 1.0.3 plus the inline review's two comment fixes (dev BUILT 2026-10-21, NOT installed, committed to dev)
+
+Simon: "rebuild and commit to dev", and yes to a version bump (1.0.3 was installed, so new bytes under
+1.0.3 would make the rig's 1.0.3 and dev's 1.0.3 differ). The only change from 1.0.3 is the two
+comment/placement fixes recorded in its INLINE REVIEW below: no code line moved, so **no
+`STREAM_KEY_VERSION` bump** (stays 28: nothing cached changes meaning) and installing it is optional.
+`install.xml`/`repo.xml` 1.0.4; zip 26 entries, 579,201 bytes; `repo.xml <sha>`
+`47004c4abb26b6aeb4d9512af14025ac588cd3d4`; unzipped `diff -r` identical to the tree; all 16 suites green
+(1,391) on the tree, and `t_releaserank`/`t_reviewintro`/`t_perf` green against the extracted Browse.pm.
+
+## Status: 1.0.3 — a same-titled single no longer takes an album review's row, and is offered (dev BUILT 2026-10-21, INSTALLED + VERIFIED LIVE the same day, uncommitted)
+
+Simon's report (2026-10-21): *@ — Autosmile* played the 1-track title-track single, not the album.
+The live crawl found a second (*Troye Sivan — She's the Best*), 2 of 68 Qobuz rows; diagnosis and
+measurements are §B `A TITLE-TRACK SINGLE TAKES THE ROW FROM ITS ALBUM`. Simon's direction: "if
+there is two candidates then it should offer them", and Pitchfork's own data was checked for a
+format field first (there is none; the Albums rubric and the headline's "EP" are all it says).
+
+**What changed (`Browse.pm` only, plus three strings):**
+- **`_candSize` + `_sizeFromCounts`, BYTE-IDENTICAL to Discography's** (verified by hashing both
+  bodies), stamped as `_size` by all four adapters from the RAW album hash beside `_svctitle`/
+  `_year`. Spotify goes through `_spotifySizeView` (DSC `_spotifyAlbum`'s size half). Not matcher
+  subs; `matcher_sync_check.py` is unaffected (its `_albumMatches` drift is the pre-existing
+  fleet state, and none of the nine shared subs moved — hashed before/after).
+- **`_reviewIsEp`**: a trailing " EP" on Pitchfork's title (the `_stripFmt` shape) means the review
+  is of an EP; otherwise, by Pitchfork's filing, an album.
+- **`_rowPick`** replaces `$resolve`'s inline promotion: among `_exactFolded` candidates, the first
+  that is not single-sized (unknown counts as not-single), unless `_reviewIsEp`. No exact = no move,
+  as before. Loose candidates never compete on size.
+- **`_dedupeStreamItems` keys on `_size` too.** THE HOLE THE FIRST TEST RUN FOUND: the key is the
+  service's display text, Qobuz labels from artist + title + year, so the Aug single and the Oct
+  album of *She's the Best* were ONE row and the album was discarded before ranking. Unknown size
+  is '' on both sides, so without counts it collapses exactly what it did.
+- **`_releaseAlts`**: a candidate with the ROW's own title is another release when BOTH sizes are
+  known and differ; it carries `_altsize`, and `_attachReviewLink` appends the size word to LINE2
+  (`Another release with this name · Single`) — never the label (the LL door, §A2). New tokens
+  `PLUGIN_PITCHFORKREVIEWS_SIZE_SINGLE` / `_EP` / `_ALBUM`, EN + NL.
+- **`_wantsTitleRetry`**: an exact candidate settles leg 1 unless it is single-sized on a non-EP
+  review. Cost: one search on such rows only; on the 2026-10-21 feed that is none (Troye's leg 1
+  holds the album; Qobuz now returns Autosmile's). The `$finish` merge comment's "provably
+  exact-free" claim was corrected to "holds at most exact singles", which `_rowPick` handles.
+- **The resolve `_dbgv` line gains `size=`** (`?` = the service stated no counts), so the live
+  check can read what `_rowPick` saw.
+- **`STREAM_KEY_VERSION` 27 → 28, a correctness bump** (the 0.9.27 class): stored answers name the
+  wrong release and carry no `_size`. `PARSE_VERSION` stays 3. One cold warm after install.
+
+**Tests: 1,308 → 1,391, all 16 suites green.** `t_releaserank` 169 → 243 (section 5: the size
+table incl. SML/Ambarchi by duration and the 3-track EP, Spotify mapping, `_reviewIsEp`, the row
+pick both directions and its controls, the retry and its EP/unknown exemptions, the offer both
+directions, `_resolveSection` wiring, all four adapters stamping, the dedupe); `t_reviewintro`
+45 → 54 (the size word on line2 only, controls, strings EN+NL). **Anti-tested twelve ways, each
+caught by its own checks:** `_rowPick` ignoring size 6, `_reviewIsEp` always false 5, the retry
+ignoring size 5, the offer ignoring size 8, the dedupe without size 7, Qobuz not stamping 1,
+Spotify not mapped 1, duration ignored 2, no size word 2, the old promotion restored 5, the key
+left at 27 1, `_altsize` dropped 4.
+
+**Packaged:** `install.xml`/`repo.xml` 1.0.3; zip 26 entries (19 files), 579,073 bytes; `repo.xml
+<sha>` `69ef6cd8c7ef6f3858c8ba49ff55c47d8ff76bcc`; unzipped `diff -r` identical to the tree AT BUILD.
+The inline review's two fixes (below) came after and are comment/placement only; they are carried by
+**1.0.4** (above). README/CHANGELOG owed at the merge to main.
+
+**INLINE REVIEW 2026-10-21 (Simon: "do an inline review of these changes"). Two findings, both fixed;
+no behaviour change.** Scope: the whole working-tree diff (`Browse.pm`, `strings.txt`, the two suites,
+`install.xml`/`repo.xml`), plus every reader of the resolver's item list.
+1. **`%ALT_SIZE_TOKEN` was inserted between `_attachReviewLink`'s doc block and the sub**, so the
+   block read as documenting the hash (the 0.7.11 defect class, "comment blocks above the wrong sub").
+   Moved above the block.
+2. **The `$finish` merge comment still said "an exact is always at index >= 1"** and named the old
+   `$ex`. With 1.0.3 leg 1 can hold an exact SINGLE at index 0; what is always at index >= 1 is leg 2's
+   exact NON-single, which `_rowPick` returns. Restated.
+**Checked and cleared, so the next round need not re-derive them:** the combined "A / B" per-side
+promotion (`_matchExactness`, unpadded splits only) cannot undo `_rowPick` — the two releases share a
+title, so both are strict-exact or neither, and it promotes the first, which `_rowPick` already put
+there; `_findPlayableSubtitle` filters with `grep` and keeps order; `_rebuildStreamItems` and
+`_cacheStream` carry `_size` (plain scalar); `_releaseAlts` on a cache hit gets sizes; the size alt's
+favurl is the single's own (`_attachFavUrl` per item), so a Listen Later add saves the single;
+`_refreshMatchRow` renders no list, and `reviewDetail` is reached only by an unmatched row, so the
+size-aware dedupe can show no identical-looking pair anywhere; the size word is on line2 only (the LL
+door). `matcher_sync_check.py`: the nine shared subs hash identical before and after; its exit 1 is the
+pre-existing `_albumMatches` drift (Gate 1). All 16 suites green, 1,391.
+**Known and NOT addressed, stated residuals (no field case behind any of them):**
+- **An album review prefers album-sized only over SINGLE-sized.** An exact EP-sized candidate ahead of
+  the album keeps the row (short albums are EP-sized by the counts, so demoting EPs would be wrong for
+  them); the album is then offered with "· Album".
+- **An EP review gets no size preference at all** (`_reviewIsEp` only switches the single rule off); an
+  album-sized same-title release ahead of the EP keeps the row and the EP is offered.
+- **Deezer search rows carry no duration**, so a 1-3 track long album reads `single` there; worst case
+  one extra title search, or the album losing the row to a same-titled album-sized release (none seen).
+  The rig has no Deezer.
+- **The Default/Classic web skins do not print line2**, so a size alt reads identically to the row there.
+  The settled web-skin decision (§A2 `WEB SKINS GET ONE PASS`: line2 not shown, nothing moved into the
+  name), not a new gap.
+
+**VERIFIED LIVE 2026-10-21** (installed by Simon, server restart 11:10:44; read-only on Dining Room,
+paced, after the cold warm). Snapshot before the build vs after, all four sections: **183 rows / 137
+matched both times, and exactly ONE match changed** — Troye Sivan, `qobuz:album:eo0qj6qafzbty` (the
+1-track single) -> `qobuz:album:f1wvsbkiki6zu` (the album; tracklist She's the Best, Party, Canada Dry
+...). Its drill-in offers the single as `Another release with this name · Single`, which opens to the
+1-track release. Autosmile already played the album before the snapshot (the row had re-resolved since
+the morning crawl) and now offers its single the same way. **Every matched row's drill-in walked (118
+unique): 13 offer another release** — 7 by SIZE, all a same-titled single under the album (@ Autosmile,
+Nino Paid *Somewhere Over the Rainbow*, B0YG1RL / Novagang *EXIT 2B*, Troye Sivan, Beth Orton *Weather
+Alive*, Rachika Nayar *Heaven Come Crashing*, The Beths *Expert in a Dying Field*), and 6 by TITLE (the
+0.9.27 rule, no size word: Costello 49th Anniversary, Rubber Soul 2026 Mix, Northern Exposure Redux,
+Endure Remixed, MOTOMAMI +, Dawn FM Alternate World). **That settles the Qobuz question: Qobuz
+`catalog/search` album rows DO carry `tracks_count`** — `_candSize` on the raw search hash is the only
+size source, and it produced both sides of every size offer. (LBF's `_attachFavUrl` comment saying the
+count is absent from search responses is wrong for Qobuz; TIDAL search still unobserved.) The debug
+`size=` line was not needed and was not read.
 
 ## Status: 1.0.2 — the matched service as Material's badge (dev built 2026-09-18, INSTALLED, badge VERIFIED LIVE)
 

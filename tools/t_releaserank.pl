@@ -939,6 +939,221 @@ print "\n4. release alts — editions collapse, releases do not\n";
 }
 
 # =============================================================================
+print "\n# 5. SIZE: a same-titled single never takes an album review's row, and is offered (1.0.3)\n";
+# =============================================================================
+# THE FIELD CASES, measured live 2026-10-21 (2 of 68 Qobuz rows), both a 1-track title-track
+# single beside the album with the SAME title, so 0.9.27's title rule could not split them:
+#   (b) Troye Sivan - She's the Best: artist search returns the single at 7, the album at 21;
+#       both exact, so service order decided and the single took the row.
+#   (a) @ - Autosmile (17 Oct): the artist search returned the single and NOT the album; the
+#       single was exact, so the title leg (which had the album, first) never ran.
+# Pitchfork files every review PFR reads under "Albums" and marks an EP in the title, so an
+# exact SINGLE is evidence the album is missing or behind it. Sizes are the Discography rule.
+sub scand { my ($t, $size, $who) = @_;
+            return { name => ($who // 'Troye Sivan') . " - $t", _svctitle => $t, image => 'c.jpg',
+                     (defined $size ? (_size => $size) : ()) } }
+my $TROYE = "She's the Best";
+{
+    my $sz = $B->can('_candSize');
+    print "5a. _candSize — counts first, duration decides a long short record\n";
+    is('Qobuz 1-track single',                    $sz->({ tracks_count => 1,  duration => 213 }),  'single');
+    is('Qobuz 12-track album',                    $sz->({ tracks_count => 12, duration => 2556 }), 'album');
+    is('SML: 2 tracks, 48 min is an ALBUM',        $sz->({ tracks_count => 2,  duration => 2880 }), 'album');
+    is('Ambarchi: 2 tracks, 43 min is an ALBUM',   $sz->({ tracks_count => 2,  duration => 2580 }), 'album');
+    is('a 3-track, 23-minute EP reads single (why an EP review is exempt, 5b)',
+                                                  $sz->({ tracks_count => 3,  duration => 1380 }), 'single');
+    is('4 tracks, 15 min is an EP',                $sz->({ tracks_count => 4,  duration => 900 }),  'ep');
+    is('7 short tracks is an album (count > 6)',   $sz->({ tracks_count => 7,  duration => 1200 }), 'album');
+    is('TIDAL count field',                        $sz->({ numberOfTracks => 1 }), 'single');
+    is('TIDAL stated type, no counts',             $sz->({ type => 'EP' }), 'ep');
+    is('Deezer: the count beats record_type',      $sz->({ nb_tracks => 1, record_type => 'album' }), 'single');
+    is('Deezer: record_type when no count',        $sz->({ record_type => 'single' }), 'single');
+    is('Deezer entity `type` never outranks a count', $sz->({ nb_tracks => 10, type => 'album' }), 'album');
+    ok('nothing stated -> unknown',               !defined $sz->({}));
+    ok('a junk count -> unknown',                 !defined $sz->({ tracks_count => 'x' }));
+    ok('not a hash -> unknown',                   !defined $sz->(undef));
+
+    my $sv = sub { $sz->($B->can('_spotifySizeView')->(@_)) };
+    is('Spotify album_type album',                 $sv->({ album_type => 'album', total_tracks => 2 }), 'album');
+    is('Spotify compilation',                      $sv->({ album_type => 'compilation' }), 'album');
+    is('Spotify single, 1 track',                  $sv->({ album_type => 'single', total_tracks => 1 }), 'single');
+    is('Spotify files EPs as single: 5 tracks -> ep', $sv->({ album_type => 'single', total_tracks => 5 }), 'ep');
+    ok('Spotify single with no count -> unknown',  !defined $sv->({ album_type => 'single' }));
+    ok('Spotify with nothing -> unknown',          !defined $sv->({}));
+}
+{
+    print "5b. _reviewIsEp — Pitchfork's only format marker\n";
+    my $ep = $B->can('_reviewIsEp');
+    ok('"I Wander EP" is an EP review',  $ep->('I Wander EP'));
+    ok('"Faith EP" is an EP review',     $ep->('Faith EP'));
+    ok('"Autosmile" is not',            !$ep->('Autosmile'));
+    ok('"Foo LP" is not',               !$ep->('Foo LP'));
+    ok('"Sleep" is not (a word ending in ep)', !$ep->('Sleep'));
+    ok('a bare "EP" title is not (the _stripFmt rule: needs a base)', !$ep->('EP'));
+}
+{
+    print "5c. the row — among exact titles, not a single\n";
+    my $r = resolve('Troye Sivan', $TROYE,
+        Qobuz => { script => [ [ scand($TROYE, 'single'), scand($TROYE, 'album') ] ] });
+    my @t = map { $_->{_size} // '' } @{ $r->{items} || [] };
+    is('Troye: the ALBUM takes the row',          $t[0], 'album');
+    is('...the single is kept, behind it',        $t[1], 'single');
+    is('...nothing dropped',                      scalar(@t), 2);
+    is('...and the CACHED order agrees (what a later open replays)',
+        ($WROTE[-1]{items}[0] || {})->{_size}, 'album');
+    is('one query: an exact album in leg 1 settles it', scalar(queries()), 1);
+
+    $r = resolve('Troye Sivan', $TROYE, Qobuz => { script => [ [ scand($TROYE), scand($TROYE, 'album') ] ] });
+    is('CONTROL: unknown size is not single — service order stands',
+        ($r->{items}[0] || {})->{_size} // 'undef', 'undef');
+
+    $r = resolve('Troye Sivan', $TROYE, Qobuz => { script => [ [ scand($TROYE, 'album'), scand("$TROYE (Deluxe)", 'album') ] ] });
+    is('CONTROL: two album-sized editions keep service order', (titles($r))[0], $TROYE);
+
+    $r = resolve('Deafheaven', 'Bomb EP', Qobuz => { script => [
+        [ scand('Bomb', 'single', 'Deafheaven'), scand('Bomb', 'album', 'Deafheaven') ] ] });
+    is('an EP REVIEW keeps its single-sized match (3-track EPs exist)',
+        ($r->{items}[0] || {})->{_size}, 'single');
+
+    $r = resolve('Troye Sivan', $TROYE, Qobuz => { script => [
+        [ scand($TROYE, 'single'), scand("$TROYE (Live)", 'album') ], [] ] });
+    is('only EXACT titles compete: a loose album never beats an exact single', (titles($r))[0], $TROYE);
+
+    my $pick = $B->can('_rowPick');
+    is('_rowPick: nothing exact -> 0', $pick->($TROYE, [ scand('Other', 'album'), scand('Else', 'album') ]), 0);
+    is('_rowPick: all exact singles -> the first', $pick->($TROYE, [ scand($TROYE, 'single'), scand($TROYE, 'single') ]), 0);
+    is('_rowPick: reaches past a loose row and an exact single',
+        $pick->($TROYE, [ scand('Other', 'album'), scand($TROYE, 'single'), scand($TROYE, 'album') ]), 2);
+}
+{
+    print "5d. the title leg — an exact single does not settle an album review\n";
+    my $w = $B->can('_wantsTitleRetry');
+    ok('exact single only -> retry',                 $w->($TROYE, [ scand($TROYE, 'single') ]));
+    ok('exact single + exact album -> no retry',    !$w->($TROYE, [ scand($TROYE, 'single'), scand($TROYE, 'album') ]));
+    ok('exact album only -> no retry',              !$w->($TROYE, [ scand($TROYE, 'album') ]));
+    ok('exact EP-sized -> no retry',                !$w->($TROYE, [ scand($TROYE, 'ep') ]));
+    ok('exact, size unknown -> no retry (no evidence)', !$w->($TROYE, [ scand($TROYE) ]));
+    ok('an EP review: exact single-sized -> no retry', !$w->('Bomb EP', [ scand('Bomb', 'single') ]));
+
+    my $FOUND = $B->can('STREAM_FOUND_TTL')->();
+    my $r = resolve('@', 'Autosmile', Qobuz => { script => [
+        [ scand('Autosmile', 'single', '@') ],     # 17 Oct: the artist leg had only the single
+        [ scand('Autosmile', 'album',  '@') ],     # the title leg returned the album, first
+    ] });
+    my @q = queries();
+    is('Autosmile: two legs were run',            scalar(@q), 2);
+    is('...leg 2 asked for the title',            $q[1], 'Autosmile');
+    is('...and the ALBUM takes the row',          ($r->{items}[0] || {})->{_size}, 'album');
+    is('...the single kept behind it',            ($r->{items}[1] || {})->{_size}, 'single');
+    is('...validated: leg 2 answered',            ttl_written(), $FOUND);
+
+    $r = resolve('@', 'Autosmile', Qobuz => { script => [
+        [ scand('Autosmile', 'single', '@') ], [ scand('Autosmile', 'single', '@') ] ] });
+    is('leg 2 finds no album: the single still plays', ($r->{items}[0] || {})->{_size}, 'single');
+    is('...listed once',                          scalar(@{ $r->{items} }), 1);
+
+    resolve('Deafheaven', 'Bomb EP', Qobuz => { script => [ [ scand('Bomb', 'single', 'Deafheaven') ] ] });
+    is('an EP review pays no second search',      scalar(queries()), 1);
+}
+{
+    print "5e. the offer — the other size is another release\n";
+    my $alts = $B->can('_releaseAlts');
+    my $res  = sub { { items => [ map { { %$_, _svc => 'Qobuz' } } @_ ] } };
+
+    my @a = $alts->(scand($TROYE, 'album'), $res->(scand($TROYE, 'album'), scand($TROYE, 'single')));
+    is('Troye: the single is offered under the album', scalar(@a), 1);
+    is('...it is the single',                     $a[0]{_size}, 'single');
+    is('...tagged with the size that sets it apart', $a[0]{_altsize}, 'single');
+    is('...still a release alt',                  $a[0]{_altkind}, 'release');
+
+    @a = $alts->(scand('Bomb', 'single'), $res->(scand('Bomb', 'single'), scand('Bomb', 'album')));
+    is('the other direction: the album offered under a single-sized row', ($a[0] || {})->{_altsize}, 'album');
+
+    @a = $alts->(scand($TROYE, 'album'), $res->(scand($TROYE, 'album'), scand("$TROYE (Deluxe Edition)", 'album')));
+    is('CONTROL: editions of one size still collapse', scalar(@a), 0);
+
+    @a = $alts->(scand($TROYE, 'album'), $res->(scand($TROYE, 'album'), scand($TROYE)));
+    is('CONTROL: an unstated size offers nothing new (0.9.27 behaviour)', scalar(@a), 0);
+    @a = $alts->(scand($TROYE), $res->(scand($TROYE), scand($TROYE, 'single')));
+    is('CONTROL: ...nor does an unstated primary', scalar(@a), 0);
+
+    @a = $alts->(scand($TROYE, 'album'), $res->(scand($TROYE, 'album'), scand($TROYE, 'single'),
+                                                 scand("$TROYE (Remix)", 'single')));
+    is('a size alt and a title alt together',     scalar(@a), 2);
+    ok('...only the size alt carries _altsize',   defined $a[0]{_altsize} && !exists $a[1]{_altsize});
+
+    @a = $alts->(cand($ALBUM), $res->(cand($ALBUM), { %{ cand($SINGLE) }, _size => 'single' }));
+    ok('CONTROL: a differently-titled alt is not tagged with a size', !exists $a[0]{_altsize});
+}
+{
+    print "5f. wiring — _resolveSection hands the offer to the row\n";
+    my $it = { artist => 'Troye Sivan', album => $TROYE, date => '2026-10-09T04:00:00.000Z' };
+    {
+        no warnings 'redefine';
+        local *Plugins::PitchforkReviews::Browse::_findPlayableReview = sub {
+            $_[1]->({ items => [ map { { %$_, _svc => 'Qobuz' } } scand($TROYE, 'album'), scand($TROYE, 'single') ] });
+        };
+        $B->can('_resolveSection')->(undef, [ $it ], sub {}, 10, 'view');
+    }
+    is('the row plays the album',                 ($it->{_album} || {})->{_size}, 'album');
+    is('...and its drill-in offers the single',   (($it->{_alt} || [])->[0] || {})->{_altsize}, 'single');
+}
+{
+    print "5g. every adapter stamps _size from the service's own album hash\n";
+    no warnings 'redefine', 'once';
+    my $collected;
+    my $grab = sub { $collected = $_[0] };
+    my $first = sub { ((ref $collected eq 'ARRAY' ? $collected : [])->[0] || {})->{_size} // 'undef' };
+    my @args = ('Troye Sivan', 'troye sivan', $B->can('_norm')->($TROYE));
+    {
+        local *Plugins::Qobuz::Plugin::getAPIHandler = sub { bless {}, 'T::QobuzAPI5' };
+        local *T::QobuzAPI5::search = sub { $_[1]->({ albums => { items => [
+            { id => 'q1', title => $TROYE, artist => { name => 'Troye Sivan' }, tracks_count => 1, duration => 200 } ] } }) };
+        local *Plugins::Qobuz::Plugin::_albumItem = sub { { name => 'x', url => sub {} } };
+        $B->can('_searchQobuz')->(undef, @args, 'Qobuz', $grab, $TROYE);
+        is('Qobuz: tracks_count + duration',      $first->(), 'single');
+    }
+    {
+        local *Plugins::TIDAL::Plugin::getAPIHandler = sub { bless {}, 'T::TidalAPI5' };
+        local *T::TidalAPI5::search = sub { $_[1]->([
+            { id => 't1', title => $TROYE, artist => { name => 'Troye Sivan' }, numberOfTracks => 12, duration => 2556 } ]) };
+        local *Plugins::TIDAL::Plugin::_renderAlbum = sub { { name => 'x', url => sub {} } };
+        $B->can('_searchTidal')->(undef, @args, 'Tidal', $grab, $TROYE);
+        is('TIDAL: numberOfTracks',               $first->(), 'album');
+    }
+    {
+        local *Plugins::Deezer::Plugin::getAPIHandler = sub { bless {}, 'T::DeezerAPI5' };
+        local *T::DeezerAPI5::search = sub { $_[1]->([
+            { id => 'd1', title => $TROYE, artist => { name => 'Troye Sivan' }, nb_tracks => 5, record_type => 'single' } ]) };
+        local *Plugins::Deezer::Plugin::_renderAlbum = sub { { name => 'x', url => sub {} } };
+        $B->can('_searchDeezer')->(undef, @args, 'Deezer', $grab, $TROYE);
+        is('Deezer: nb_tracks',                   $first->(), 'ep');
+    }
+    {
+        local *Plugins::Spotty::Plugin::getAPIHandler = sub { bless {}, 'T::SpottyAPI5' };
+        local *Plugins::Spotty::API::hasError429 = sub { 0 };
+        local *T::SpottyAPI5::search = sub { $_[1]->([
+            { id => 's1', name => $TROYE, artist => 'Troye Sivan', album_type => 'album', total_tracks => 12 } ]) };
+        local *Plugins::Spotty::OPML::_albumItem = sub { { name => 'x', url => sub {} } };
+        $B->can('_searchSpotify')->(undef, @args, 'Spotify', $grab, $TROYE);
+        is('Spotify: through _spotifySizeView',   $first->(), 'album');
+    }
+    ok('a correctness bump retired the :27: answers (they hold no _size)',
+       $B->can('STREAM_KEY_VERSION')->() >= 28);
+}
+{
+    print "5h. the dedupe — a single and its album render IDENTICALLY on Qobuz\n";
+    # Qobuz's `_albumItem` labels from artist + title + year, so the Aug single and the Oct album
+    # are the same row to a display-text key. Found by 5c on its first run: the album was being
+    # discarded here, before any ranking ran.
+    my $d = sub { scalar @{ $B->can('_dedupeStreamItems')->([ map { { %$_, _svc => 'Qobuz', line2 => 'Troye Sivan (2026)' } } @_ ]) } };
+    is('same label, different sizes: both kept',  $d->(scand($TROYE, 'single'), scand($TROYE, 'album')), 2);
+    is('same label, same size: one (the duplicate the dedupe exists for)',
+                                                  $d->(scand($TROYE, 'album'), scand($TROYE, 'album')), 1);
+    is('CONTROL: sizes unstated collapse exactly as before', $d->(scand($TROYE), scand($TROYE)), 1);
+}
+
+# =============================================================================
 print "\n# 3h. an `empty_unverified` service's empty answer ABOVE the winner holds the row a day (0.9.36)\n";
 # =============================================================================
 # Driven through the REAL _findPlayable: a _streamTtl that honours the flag is worth nothing if

@@ -228,7 +228,8 @@ album retries on every cycle for ever.
 |---|---|---|
 | `_albumid` | Native album id — parse it from the item's uri if there is no bare id field | Favourites url / Listen to Later handshake |
 | `_svctitle` | The service's own raw album title. Not the rendered row label (which usually has the artist baked in) and not the MusicBrainz title | The album name sent in the handshake |
-| `_ctype` | `_candReleaseType($rawAlbum)` — `album`, `single`, `ep`, or `''` | Dropping a same-named single for an album target |
+| `_ctype` | LBF only: `_candReleaseType($rawAlbum)` — `album`, `single`, `ep`, or `''` | Dropping a same-named single for an album target |
+| `_size` | PFR only (1.0.3): `_candSize($rawAlbum)`, Discography's rule byte-identical — `album`, `ep`, `single`, or undef. Spotify goes through `_spotifySizeView` first. Qobuz search rows DO carry `tracks_count` (seen live 2026-10-21) | Which of two same-titled releases plays, offering the other, and the dedupe key. Never a reason to drop a candidate |
 | `_year` | `_svcYear($rawAlbum)` | Release-year fallback in date-ordered lists |
 
 The caller stamps the service name itself; the adapter does not.

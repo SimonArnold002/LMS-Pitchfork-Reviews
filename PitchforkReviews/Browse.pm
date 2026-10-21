@@ -203,7 +203,13 @@ use constant STREAM_KEY_PREFIX       => 'pfr:stream:';
 # the whole store through a cold warm again; what keeps that from re-pinning rows is the same
 # build's `empty_unverified` cap and the 429 back-off, not a slow warm (rejected — see
 # PACED_WARM_GAP).
-use constant STREAM_KEY_VERSION      => 27;
+#
+# :27: -> :28: (1.0.3). A CORRECTNESS BUMP, the 0.9.27 class. Which release takes the row changed
+# (a single-sized exact title no longer beats an album-sized one — see _rowPick), and every
+# matched item now carries `_size`, which nothing stored under :27: has. So a :27: entry can name
+# the wrong release (Troye Sivan's *She's the Best* single, pinned 30 days) and cannot offer the
+# other one. The store goes through one cold warm.
+use constant STREAM_KEY_VERSION      => 28;
 
 # How long a coalescing slot may be joined before it is assumed wedged (see
 # _findPlayable). Comfortably past the worst honest resolve — four serial
@@ -1752,6 +1758,11 @@ sub _extid {
     return defined $id && length $id ? "$pfx:album:$id" : "$pfx:";
 }
 
+# The word a size-only release alt carries on line2 (1.0.3, `_altsize` from _releaseAlts).
+my %ALT_SIZE_TOKEN = (single => 'PLUGIN_PITCHFORKREVIEWS_SIZE_SINGLE',
+                      ep     => 'PLUGIN_PITCHFORKREVIEWS_SIZE_EP',
+                      album  => 'PLUGIN_PITCHFORKREVIEWS_SIZE_ALBUM');
+
 # Wrap a matched album node's tracklist coderef so drilling into the album shows the
 # review — capsule, then the "Read the full review" link — above the tracks, WITHOUT
 # losing playability: the row stays a `type => 'playlist'` node (Play/Add from the list
@@ -1822,6 +1833,11 @@ sub _attachReviewLink {
         $a{line1} = $lbl;
         $a{line2} = cstring($client, $rel ? 'PLUGIN_PITCHFORKREVIEWS_ALSO_RELEASED'
                                           : 'PLUGIN_PITCHFORKREVIEWS_ALSO_REVIEWED');
+        # A release offered only because of its SIZE has the same title as the row above it
+        # (1.0.3, `_altsize` — see _releaseAlts), so say which one it is. On line2, never the
+        # label: a Spotify alt is `native_favurl`, and ListenLater stores its LABEL as the title.
+        $a{line2} .= " \x{b7} " . cstring($client, $ALT_SIZE_TOKEN{ $a{_altsize} })
+            if $rel && defined $a{_altsize} && $ALT_SIZE_TOKEN{ $a{_altsize} };
         $a{image} = _fitCover($a{_cover} || $a{image}) || DIVIDER_ICON;
         my $extid = $a{extid} // _extid($alt);
         $a{extid} = $extid if defined $extid;
@@ -3183,6 +3199,101 @@ sub _exactFolded {
     return _releaseKey($svc) eq $a ? 1 : 0;
 }
 
+# WHAT SIZE OF RELEASE a service candidate is: 'album', 'ep', 'single' or undef (unknown) — 1.0.3.
+# PORTED FROM DISCOGRAPHY (`Sources.pm` _candSize / _sizeFromCounts), byte-identical, so the two
+# plugins classify one record the same way. It is the Qobuz plugin's own rule for its artist pages:
+# 30+ minutes or more than 6 tracks is an album, under 4 tracks a single, anything between an EP.
+# Counts first (Qobuz tracks_count, TIDAL numberOfTracks, Deezer nb_tracks; durations in seconds);
+# a stated type only when there are no counts (TIDAL `type`, Deezer `record_type`). Qobuz's own
+# `release_type` is NOT read — Discography 0.46.8 found it unreliable. Spotify carries neither
+# shape and is mapped first (_spotifySizeView). Not a matcher sub, so no fleet sync obligation.
+#
+# DURATION IS LOAD-BEARING, measured on the live feed 2026-10-21: SML's *Spontaneous Music Live*
+# (2 tracks, 48 min) and Oren Ambarchi's *Cooked* (2 tracks, 43 min) are albums, and a count-only
+# rule calls them singles. Deezer's search rows carry no duration, so there a 1-3 track record of
+# any length reads `single` — which, below, only ever costs one extra search or one extra row.
+#
+# WHAT IT IS FOR, AND WHAT IT IS NOT. It decides what to OFFER and, between two candidates with the
+# SAME title, which one the row plays. It never drops a candidate (the 0.9.27 decision: ledger B,
+# `PFR will NOT get LBF's _candReleaseType`). Unknown stays unknown and changes nothing.
+sub _candSize {
+    my ($album) = @_;
+    return undef unless ref $album eq 'HASH';
+    my ($tracks) = grep { defined && !ref && /^\d+$/ }
+                   map { $album->{$_} } qw(tracks_count numberOfTracks nb_tracks);
+    my $dur = $album->{duration};
+    $dur = undef unless defined $dur && !ref $dur && $dur =~ /^\d+(?:\.\d+)?$/;
+    return _sizeFromCounts($tracks, $dur) if $tracks;
+    my $type = lc($album->{record_type} // $album->{type} // '');
+    return 'album'  if $type eq 'album' || $type eq 'compile';
+    return 'ep'     if $type eq 'ep';
+    return 'single' if $type eq 'single';
+    return undef;
+}
+
+sub _sizeFromCounts {
+    my ($tracks, $dur) = @_;
+    return 'album'  if ($dur && $dur >= 1800) || $tracks > 6;
+    return 'single' if $tracks < 4;
+    return 'ep';
+}
+
+# Spotify's album hash in the words _candSize reads — Discography's `_spotifyAlbum`, size half
+# only, so _candSize stays identical for every other service. Spotty's normalize() keeps
+# `album_type` and `total_tracks` (verified in the ListenBrainz repo,
+# docs/spotify-spotty-adapter-pr17.md). Spotify has no duration and no EP class (EPs are filed
+# `single`), so an album/compilation is taken at its word and a `single` is sized by its count.
+sub _spotifySizeView {
+    my ($al) = @_;
+    return undef unless ref $al eq 'HASH';
+    my $type = lc($al->{album_type} // '');
+    return { record_type => 'album' } if $type eq 'album' || $type eq 'compilation';
+    return { tracks_count => $al->{total_tracks} }
+        if $type eq 'single' && defined $al->{total_tracks} && !ref $al->{total_tracks}
+        && $al->{total_tracks} =~ /^\d+$/;
+    return {};
+}
+
+# PITCHFORK SAYS "EP" WHEN IT REVIEWS ONE, and that is the only thing it says about format.
+# Measured 2026-10-21 on four review pages: no format field anywhere in the Verso state; every
+# review PFR reads is filed under "Albums" (`isTrackReview` false — singles are reviewed under
+# Tracks, which PFR never fetches), and an EP is marked only by the word after the italics,
+# `<em>Title</em> EP`, which reaches us as a trailing " EP" on the album title (the same suffix
+# `_stripFmt` folds away to make the match work). So a review is of an ALBUM unless it says EP.
+#
+# Why it matters here: a 3-track EP is single-sized by the counts (Deafheaven, 3 tracks / 23 min),
+# so an EP review must not have its single-sized match demoted or re-searched on that account.
+sub _reviewIsEp {
+    my ($album) = @_;
+    return 0 unless defined $album && !ref $album;
+    return _norm($album) =~ /\sep$/ ? 1 : 0;
+}
+
+# WHICH CANDIDATE THE ROW PLAYS, as an index into `$items` (1.0.3; 0.9.27's promotion widened).
+#
+# 0.9.27: an EXACT title beats a loose one (Interpol's album over *…/See Out Loud*). That cannot
+# split two releases with the SAME title, and the live feed has two (2026-10-21, 2 of 68 Qobuz
+# rows): *Troye Sivan — She's the Best* and *@ — Autosmile*, each a 1-track title-track single
+# AND the 11-12 track album. Both exact, so service order decided, and the single won.
+#
+# So among the exact candidates the first one that is NOT single-sized takes the row — unless
+# the review says EP (_reviewIsEp). Grounded in Pitchfork's own filing rather than a guess: an
+# Albums review is never of a single. Unknown size counts as not-single (no evidence is not
+# evidence), so a service that states no counts behaves exactly as 0.9.27 did. With no exact
+# candidate nothing moves, as before. The single is not lost: _releaseAlts offers it.
+sub _rowPick {
+    my ($album, $items) = @_;
+    return 0 unless ref $items eq 'ARRAY' && @$items;
+    my @ex = grep { _exactFolded($album, $items->[$_]) } 0 .. $#$items;
+    return 0 unless @ex;
+    unless (_reviewIsEp($album)) {
+        for my $i (@ex) {
+            return $i if (($items->[$i] || {})->{_size} // '') ne 'single';
+        }
+    }
+    return $ex[0];
+}
+
 # Is a second search on the ALBUM TITLE worth spending, given what the artist leg returned?
 #
 # Two shapes qualify, and only two:
@@ -3196,13 +3307,25 @@ sub _exactFolded {
 # retrying on that would spend a full STREAM_SVC_TIMEOUT to learn nothing, on every album,
 # and it is exactly the shape a stubbed or future adapter presents. So the retry needs
 # POSITIVE evidence of looseness, not merely the absence of evidence of exactness.
+#
+# A THIRD SHAPE (1.0.3): every exact candidate is SINGLE-SIZED and the review does not say EP.
+# The field case is *@ — Autosmile* (17 Oct 2026): Qobuz's artist search returned the 1-track
+# title-track single and not the album (Qobuz has since fixed its "@" search), the single was
+# exact, so the title leg — which DID return the album, first — never ran, and the single was
+# pinned for STREAM_FOUND_TTL. An Albums review is never of a single (see _reviewIsEp), so an
+# exact single is positive evidence that the album is missing, not that it was found. Cost: one
+# search, only on such rows — none of the 68 live Qobuz rows on 2026-10-21 once Qobuz's own fix
+# is counted. Unknown size is not single, so a service stating no counts never pays it. Size, not
+# `_matchExactness` — the widening declined in 0.9.29 is a different one and stays declined.
 sub _wantsTitleRetry {
     my ($album, $res) = @_;
     return 0 unless defined $res && ref $res eq 'ARRAY';
     return 1 unless @$res;                                    # nothing found at all
+    my $ep = _reviewIsEp($album);
     my $stated = 0;
     for my $it (@$res) {
-        return 0 if _exactFolded($album, $it);                # one exact is enough to settle
+        # one exact is enough to settle — unless it is a single standing in for an album
+        return 0 if _exactFolded($album, $it) && ($ep || (($it->{_size} // '') ne 'single'));
         $stated++ if ref $it eq 'HASH' && defined $it->{_svctitle}
                   && !ref $it->{_svctitle} && length $it->{_svctitle};
     }
@@ -3252,15 +3375,23 @@ use constant ALT_RELEASE_MAX => 2;
 # candidate here comes from ONE service (the resolver only ever returns `$win`'s matches), so
 # this can never offer "the same album on Tidal" as though it were a different record.
 #
-# The residual gap is an EP and an album titled identically with no bracket to tell them
-# apart, which no title rule can split. That is where a service's own type field would earn
-# its keep — as a reason to OFFER a second row, never as a reason to drop one.
+# The residual gap was an EP or single and an album titled identically with no bracket to tell
+# them apart, which no title rule can split — and the live feed has two (2026-10-21: Troye
+# Sivan's *She's the Best* and @'s *Autosmile*, each a 1-track single beside the album). That is
+# where the service's own counts earn their keep, AS A REASON TO OFFER, never to drop (1.0.3):
+# a candidate with the ROW's own title is another release when BOTH sizes are known (_candSize)
+# and differ, so the single and the album offer each other while editions of one record (both
+# album-sized) still collapse. A size the service did not state changes nothing — the 0.9.27
+# behaviour, exactly, which is also what keeps two identical-looking rows with nothing to tell
+# them apart off the page. Such an alt carries `_altsize`, so the row can say which one it is.
+# Candidates with a DIFFERENT title are judged by title alone, as before.
 sub _releaseAlts {
     my ($primary, $res) = @_;
 
     # No service title means no evidence, and a guess here would offer the same record twice.
     my $pn = _releaseKey(($primary || {})->{_svctitle} // '');
     return () unless length $pn;
+    my $psize = ($primary || {})->{_size};
 
     my %seen = ($pn => 1);
     my @out;
@@ -3270,10 +3401,18 @@ sub _releaseAlts {
         next unless defined $t && !ref $t && length $t;
         my $n = _releaseKey($t);
         next unless length $n;
-        next if $seen{$n}++;
+        my $sz = $node->{_size};
+        my $bySize = $n eq $pn;
+        if ($bySize) {
+            next unless defined $psize && defined $sz && $sz ne $psize;
+            next if $seen{"$n\x{0}$sz"}++;
+        }
+        else {
+            next if $seen{$n}++;
+        }
         # A COPY, never the node the resolver cached and handed other callers — the same
         # rule the combined-review sides follow when they tag `_side`/`_sidetitle`.
-        push @out, { %$node, _altkind => 'release' };
+        push @out, { %$node, _altkind => 'release', ($bySize ? (_altsize => $sz) : ()) };
     }
     return @out;
 }
@@ -3814,12 +3953,13 @@ sub _findPlayable {
         # 3 loose over 168 matches, and all three loose ones were whole titles with no
         # exact rival to be promoted over them.
         #
-        # `grep` returns the matching INDEX because the block is a plain condition; the
-        # `if $ex` skips the no-op when the exact one is already first (and when there is
-        # none, `$ex` is undef). Same idiom as the split path, deliberately.
+        # AND AMONG THE EXACT ONES, NOT A SINGLE (1.0.3) — Troye Sivan's *She's the Best*: the
+        # 1-track single and the 12-track album are both exact, and service order put the
+        # single first. `_rowPick` carries the rule and its reasons; it returns 0 when nothing
+        # should move, so the splice below is skipped exactly as the old `if $ex` skipped it.
         if (@$items > 1) {
-            my ($ex) = grep { _exactFolded($album, $items->[$_]) } 0 .. $#$items;
-            unshift @$items, splice(@$items, $ex, 1) if $ex;
+            my $pick = _rowPick($album, $items);
+            unshift @$items, splice(@$items, $pick, 1) if $pick;
         }
 
         $items = [ @{$items}[0 .. STREAM_MAX_RESULTS - 1] ] if @$items > STREAM_MAX_RESULTS;
@@ -3846,6 +3986,9 @@ sub _findPlayable {
         _dbgv("resolve '$artistNorm / $albumNorm': "
             . (defined $win ? "matched on $adapters[$win]{name} (" . scalar(@$items) . ') '
                               . _matchExactness($album, $items->[0])
+                              # 1.0.3: the size the row's pick was judged at, '?' = the service
+                              # stated no counts (so _rowPick could not use it)
+                              . ' size=' . (($items->[0] || {})->{_size} // '?')
                               . ((($outcome[$win] // '') ne OUTCOME_ANSWERED)
                                     ? ' UNVALIDATED (leg 2 never answered, '
                                       . STREAM_UNVALIDATED_TTL . 's)'
@@ -3950,19 +4093,22 @@ sub _findPlayable {
             # conservative one and it is also the one the plugin shipped for four versions.
             #
             # AND LEG 1 CAN LEAD UNCONDITIONALLY, which is why there is no test on leg 2
-            # here. `_wantsTitleRetry` returns 0 the moment leg 1 holds a folded-exact, so
-            # reaching this merge at all PROVES `@leg1` is exact-free. The only exact that
-            # can exist is leg 2's, and the promotion in $resolve lifts it from wherever it
-            # sits in the merged list — the order never decided that case, only the case
-            # where nothing is exact. A conditional "lead with leg 2 when it brought the
-            # exact" was built first and is provably a no-op: it was anti-tested by
+            # here. `_wantsTitleRetry` returns 0 the moment leg 1 holds a folded-exact that
+            # is not a single standing in for an album, so reaching this merge PROVES `@leg1`
+            # holds no such exact — at most exact SINGLES (1.0.3, the Autosmile retry). The
+            # only exact non-single that can exist is leg 2's, and the promotion in $resolve
+            # (`_rowPick`, which prefers a non-single among the exact ones) lifts it from
+            # wherever it sits in the merged list — the order never decided that case, only
+            # the case where nothing is exact. A conditional "lead with leg 2 when it brought
+            # the exact" was built first and is provably a no-op: it was anti-tested by
             # replacing it with this line, and every assertion still held.
             #
-            # It also sidesteps a real edge in that promotion, which is `if $ex` and not
-            # `if defined $ex`. Leading with leg 2 puts its exact at index 0, where `$ex`
-            # is 0 and the unshift is skipped — harmless only because the row is already
-            # first. Leading with leg 1 (non-empty by the guard above) means an exact is
-            # always at index >= 1, so the promotion genuinely runs.
+            # It also sidesteps a real edge in that promotion, which is `if $pick` and not
+            # `if defined $pick` (`_rowPick` answers 0 for "leave it"). Leading with leg 2
+            # puts its exact at index 0, where the unshift is skipped — harmless only because
+            # the row is already first. Leading with leg 1 (non-empty by the guard above)
+            # means leg 2's exact non-single is always at index >= 1 — leg 1 holds at most
+            # exact singles, which `_rowPick` passes over — so the promotion genuinely runs.
             #
             # `_dedupeStreamItems` still collapses the rows both legs returned, and
             # `_releaseAlts` still offers the runner-up, so nothing is LOST by ordering —
@@ -4236,11 +4382,18 @@ sub _cacheStream {
 
 # Dedupe by service + display text (services sometimes return the same album
 # twice; different editions differ in name and are kept).
+#
+# ...AND BY SIZE (1.0.3). The display text is the SERVICE's label, and a title-track single and
+# its album render identically: Qobuz's `_albumItem` builds name/line2 from artist, title and
+# year only, so Troye Sivan's *She's the Best* single (Aug 2026) and album (Oct 2026) are the
+# same row to this key — the album was discarded HERE, before `_rowPick` could ever see it, and
+# the Autosmile title leg's album would have gone the same way. A size the service did not state
+# is '' on both sides, so without counts this collapses exactly what it did before.
 sub _dedupeStreamItems {
     my ($items) = @_;
     my (%seen, @out);
     for my $it (@{ $items || [] }) {
-        my $k = join('|', $it->{_svc} // '', $it->{name} // '', $it->{line2} // '');
+        my $k = join('|', $it->{_svc} // '', $it->{name} // '', $it->{line2} // '', $it->{_size} // '');
         next if $seen{$k}++;
         push @out, $it;
     }
@@ -4533,6 +4686,7 @@ sub _searchQobuz {
             # the SERVICE's artist spelling ($candArtist) rather than Pitchfork's.
             $item->{_svctitle} = _stripArtistAffix($album->{title}, $candArtist);
             $item->{_year}     = _svcYear($album);
+            $item->{_size}     = _candSize($album);   # 1.0.3: _rowPick / _releaseAlts
             $firstAt //= $idx;
             push @out, $item;
         }
@@ -4580,6 +4734,7 @@ sub _searchTidal {
             # the SERVICE's artist spelling ($candArtist) rather than Pitchfork's.
             $item->{_svctitle} = _stripArtistAffix($album->{title}, $candArtist);
             $item->{_year}     = _svcYear($album);
+            $item->{_size}     = _candSize($album);   # 1.0.3: _rowPick / _releaseAlts
             $firstAt //= $idx;
             push @out, $item;
         }
@@ -4634,6 +4789,7 @@ sub _searchDeezer {
             # the SERVICE's artist spelling ($candArtist) rather than Pitchfork's.
             $item->{_svctitle} = _stripArtistAffix($album->{title}, $candArtist);
             $item->{_year}     = _svcYear($album);
+            $item->{_size}     = _candSize($album);   # 1.0.3: _rowPick / _releaseAlts
             $firstAt //= $idx;
             push @out, $item;
         }
@@ -4723,6 +4879,7 @@ sub _searchSpotify {
             # The SERVICE's own title (`name` on Spotify) and release year — see _searchQobuz.
             $item->{_svctitle} = _stripArtistAffix($album->{name}, $candArtist);
             $item->{_year}     = _svcYear($album);
+            $item->{_size}     = _candSize(_spotifySizeView($album));   # 1.0.3: see _spotifySizeView
             $firstAt //= $idx;
             push @out, $item;
         }

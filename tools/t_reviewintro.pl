@@ -197,6 +197,42 @@ my $LINK = 'https://pitchfork.com/reviews/albums/x/';
     is('and PITCHFORK\'s side title',                $side->[2]{name}, 'Yaeji - EP2');
 }
 
+# --- 6b. a release offered only for its SIZE says which one it is (1.0.3) ----
+# Troye Sivan's *She's the Best*: the single and the album share a title, so the alt row's
+# label reads exactly like the row the reader drilled in from. The size word goes on LINE2,
+# never the label — a Spotify alt is `native_favurl` and ListenLater stores its LABEL as the
+# album title (ledger: `IT IS ON `line2`, AND IT MUST NEVER MOVE`).
+{
+    my (undef, $out) = render({
+        capsule => $CAP, link => $LINK, artist => 'Troye Sivan',
+        _alt => [ { name => 'Troye Sivan - She\'s the Best', _svctitle => "She's the Best",
+                    _altkind => 'release', _altsize => 'single', type => 'playlist', url => \&inner_hash } ],
+    });
+    is('line2 names the size',
+        $out->[2]{line2}, "PLUGIN_PITCHFORKREVIEWS_ALSO_RELEASED \x{b7} PLUGIN_PITCHFORKREVIEWS_SIZE_SINGLE");
+    is('...the label is untouched',      $out->[2]{name},  "Troye Sivan - She's the Best");
+    is('...and so is line1',             $out->[2]{line1}, "Troye Sivan - She's the Best");
+
+    my (undef, $alb) = render({ artist => 'Bomb', link => $LINK,
+        _alt => [ { _svctitle => 'Bomb', _altkind => 'release', _altsize => 'album', type => 'playlist', url => \&inner_hash } ] });
+    is('the album direction', $alb->[1]{line2}, "PLUGIN_PITCHFORKREVIEWS_ALSO_RELEASED \x{b7} PLUGIN_PITCHFORKREVIEWS_SIZE_ALBUM");
+
+    my (undef, $side) = render({ artist => 'Yaeji', link => $LINK,
+        _alt => [ { _sidetitle => 'EP2', _altsize => 'single', type => 'playlist', url => \&inner_hash } ] });
+    is('CONTROL: a combined-review side never carries a size word', $side->[1]{line2}, 'PLUGIN_PITCHFORKREVIEWS_ALSO_REVIEWED');
+
+    my (undef, $junk) = render({ artist => 'X', link => $LINK,
+        _alt => [ { _svctitle => 'Y', _altkind => 'release', _altsize => 'mixtape', type => 'playlist', url => \&inner_hash } ] });
+    is('CONTROL: an unknown size word is not invented', $junk->[1]{line2}, 'PLUGIN_PITCHFORKREVIEWS_ALSO_RELEASED');
+
+    # A cstring for a token missing from strings.txt does not fail: LMS shows the raw token.
+    my $st = do { local (@ARGV, $/) = ('PitchforkReviews/strings.txt'); <> } // '';
+    for my $tok (qw(PLUGIN_PITCHFORKREVIEWS_SIZE_SINGLE PLUGIN_PITCHFORKREVIEWS_SIZE_EP
+                    PLUGIN_PITCHFORKREVIEWS_SIZE_ALBUM)) {
+        ok("strings.txt declares $tok with EN and NL", $st =~ /^\Q$tok\E\n\tEN\t[^\n]*\n\tNL\t\S/m);
+    }
+}
+
 # --- 7. the matched service is Material's BADGE over the artwork (2026-09-18) ---------
 # Material draws a service emblem from `extid`, reading only the part before the first ':'
 # against its misc/emblems.json. A matched row carries the adapter name (`_svc`, capitalised)
