@@ -895,6 +895,27 @@ print "\n3e. the TTL table, enumerated\n";
             ok("$names{$from} -> $names{$to} still changes the TTL somewhere", $moves > 0);
         }
     }
+
+    # THE STAND-IN FLAG, WALKED OVER THE SAME CELLS (1.0.7, code review of 1.0.6 finding 5). The
+    # sixth argument (1.0.5) had two point tests only. Its whole contract, cell by cell, with and
+    # without the fifth (`$unverified`, every service flagged): a winning cell is held a day
+    # whatever else is true, and a cell with no winner is EXACTLY what it was without the flag.
+    # The oracle is stated from the contract, not by re-reading the sub. Anti-tested: a flag
+    # read ABOVE the `$nitems` test fails only here — 5e's point test ("a miss is still
+    # NOMATCH") cannot see it, because STREAM_NOMATCH_TTL and STREAM_UNVALIDATED_TTL are both a
+    # day; the INCONCLUSIVE cells are what tell them apart.
+    my @allFlagged = (1, 1, 1);
+    my @standBad;
+    for my $c (@cells) {
+        my (undef, undef, undef, $nitems) = @$c;
+        for my $unv (undef, \@allFlagged) {
+            my $want = $nitems ? $UNVAL : $ttl->(@$c, $unv, 0);
+            push @standBad, $c if $ttl->(@$c, $unv, 1) != $want;
+        }
+    }
+    is('stand-in: every cell x {no flags, all flagged} keeps its contract', scalar(@standBad), 0);
+    ok('stand-in: the flag still CHANGES some cell (it is not decorative)',
+        scalar grep { $ttl->(@$_, undef, 1) != $ttl->(@$_, undef, 0) } @cells);
 }
 
 # --- 4. _releaseAlts: offer the rival, never adjudicate ---------------------
@@ -1134,6 +1155,29 @@ my $TROYE = "She's the Best";
     my ($line) = grep { /retrying on album/ } @lines;
     ok('the live line says exact single, not loose',
         scalar(defined $line && $line =~ /1 exact single\(s\) standing in/ && $line !~ /loose/));
+
+    # 1.0.7 (code review of 1.0.6, finding 3): a candidate stating no title is NOT loose — the same
+    # line `_wantsTitleRetry` draws. No live adapter sends one (all four set `_svctitle`).
+    is('_retryReason: an untitled candidate is not counted loose',
+        $why->('Autosmile', [ scand('Autosmile', 'single'), { name => '@ - ?', _size => 'album' } ]),
+        '1 exact single(s) standing in for the album + 1 untitled match(es)');
+    is('CONTROL: an empty title is untitled too',
+        $why->('Autosmile', [ scand('Autosmile (Live)', 'album'), { name => 'x', _svctitle => '' } ]),
+        '1 loose match(es) + 1 untitled match(es)');
+
+    # 1.0.7 (finding 7): with debug OFF the reason is never built — `_dbgv` gates only after its
+    # argument is evaluated, so the call site must gate. The retry itself still fires.
+    my $built = 0;
+    {
+        no warnings 'redefine';
+        my $real = $why;
+        local *Plugins::PitchforkReviews::Browse::_verbose     = sub { 0 };
+        local *Plugins::PitchforkReviews::Browse::_retryReason = sub { $built++; $real->(@_) };
+        @QUERIES = ();
+        resolve('@', 'Autosmile', Qobuz => { script => [ [ scand('Autosmile', 'single', '@') ], [] ] });
+    }
+    is('debug off: the reason is not built', $built, 0);
+    is('...and the retry still ran (two legs)', scalar(@QUERIES), 2);
 }
 {
     # 1.0.6 (code review of 1.0.5, finding 5): `_reviewIsEp` and `_stripFmt` must agree on what a

@@ -1763,6 +1763,29 @@ my %ALT_SIZE_TOKEN = (single => 'PLUGIN_PITCHFORKREVIEWS_SIZE_SINGLE',
                       ep     => 'PLUGIN_PITCHFORKREVIEWS_SIZE_EP',
                       album  => 'PLUGIN_PITCHFORKREVIEWS_SIZE_ALBUM');
 
+# THE SAME WORD ON reviewDetail's STREAMING LIST (1.0.7, code review of 1.0.6 finding 1). Since
+# 1.0.3 `_dedupeStreamItems` keeps a single and its album that render identically (Qobuz labels
+# from artist + title + year), and reviewDetail lists every real match, so the pair showed as two
+# identical rows. The 1.0.3 entry ruled this out because reviewDetail "is reached only by an
+# unmatched row" — but that is unmatched AT RENDER: a row whose resolve runs past BUILD_DEADLINE
+# (any cold warm) draws unmatched, and its detail page resolves and lists the pair. So a row whose
+# label another row on the same service shares gets its size on line2 — only then, so an ordinary
+# list reads as before; on line2, never the label (the LL door, as for the alts). A COPY of each
+# row, never the node the resolver cached. A row of unknown size gets no word: the dedupe key
+# carries the size, so any pair it kept differs there, and one stated size is enough to tell them apart.
+sub _sizeLabelSameTitled {
+    my ($client, $items) = @_;
+    my $key = sub { join('|', $_[0]{_svc} // '', $_[0]{name} // '', $_[0]{line2} // '') };
+    my %n;
+    $n{ $key->($_) }++ for @$items;
+    return map {
+        my $tok = defined $_->{_size} && $ALT_SIZE_TOKEN{ $_->{_size} };
+        ($tok && $n{ $key->($_) } > 1)
+            ? { %$_, line2 => ($_->{line2} // '') . " \x{b7} " . cstring($client, $tok) }
+            : $_
+    } @$items;
+}
+
 # Wrap a matched album node's tracklist coderef so drilling into the album shows the
 # review — capsule, then the "Read the full review" link — above the tracks, WITHOUT
 # losing playability: the row stays a `type => 'playlist'` node (Play/Add from the list
@@ -1976,7 +1999,7 @@ sub reviewDetail {
         # passes a literal []) — i.e. the header was drawn over the very placeholder
         # it was written to suppress. `_svc` is the field that marks a genuine
         # service node (_rebuildStreamItems keys the cache round-trip on it).
-        my @stream = grep { ref $_ eq 'HASH' && $_->{_svc} } @$streamItems;
+        my @stream = _sizeLabelSameTitled($client, [ grep { ref $_ eq 'HASH' && $_->{_svc} } @$streamItems ]);
         push @rows, _sectionHeader($client, cstring($client, 'PLUGIN_PITCHFORKREVIEWS_SECTION_STREAMING'), $headers, \@stream, 1),
                     @stream
             if @stream;
@@ -3310,10 +3333,12 @@ sub _rowPick {
 
 # Is a second search on the ALBUM TITLE worth spending, given what the artist leg returned?
 #
-# Two shapes qualify, and only two:
+# Three shapes qualify, and only three (the third is 1.0.3's, below):
 #   * NOTHING came back — the 0.7.12 recall case, unchanged ("Leo" buries "Cicada Burnt").
 #   * Something came back, at least one candidate STATES a title, and none of them is
-#     folded-exact — the 0.9.27 case (a like-named single standing in for the album).
+#     folded-exact — the 0.9.27 LOOSE case (Interpol's *This Mirror…/See Out Loud*: a release
+#     whose title only resembles the album's).
+#   * Every exact candidate is a single STANDING IN for the album (see A THIRD SHAPE).
 #
 # "NO EVIDENCE" IS NOT "NOT EXACT", and collapsing the two is the mistake `_matchExactness`
 # was explicitly written to avoid (it reports `exactness=none` separately from `loose` for
@@ -3348,14 +3373,23 @@ sub _wantsTitleRetry {
 }
 
 # What the artist leg held when `_wantsTitleRetry` fired, in the words the debug line uses: the
-# three shapes above, counted. Only reached on a retry, and only to build that line.
+# three shapes above, counted. Only reached on a retry with debug on (the call site gates it on
+# `_verbose`, since `_dbgv`'s own gate runs after its argument is built), and only for that line.
+# A candidate that states no title is "untitled", not loose — the distinction `_wantsTitleRetry`
+# draws (no evidence is not evidence). Every live adapter states one, so it is a stub's shape today.
 sub _retryReason {
     my ($album, $leg1) = @_;
     return 'no hit' unless ref $leg1 eq 'ARRAY' && @$leg1;
-    my $stand = grep { _singleStandIn($album, $_) } @$leg1;
-    my $loose = @$leg1 - $stand;
-    return join(' + ', ($stand ? "$stand exact single(s) standing in for the album" : ()),
-                       ($loose ? "$loose loose match(es)"                          : ()));
+    my ($stand, $loose, $untitled) = (0, 0, 0);
+    for my $it (@$leg1) {
+        my $t = ref $it eq 'HASH' ? $it->{_svctitle} : undef;
+        if    (!defined $t || ref $t || !length $t) { $untitled++ }
+        elsif (_singleStandIn($album, $it))         { $stand++ }
+        else                                        { $loose++ }
+    }
+    return join(' + ', ($stand    ? "$stand exact single(s) standing in for the album" : ()),
+                       ($loose    ? "$loose loose match(es)"                          : ()),
+                       ($untitled ? "$untitled untitled match(es)"                    : ()));
 }
 
 # Real service matches out of a _findPlayable answer. _streamResult NEVER returns an
@@ -4278,7 +4312,7 @@ sub _findPlayable {
                 # SAY WHICH SHAPE FIRED IT (1.0.6). Since 1.0.3 an exact single standing in for the
                 # album fires the retry too, and "loose" described it as the opposite of what it is.
                 _dbgv("resolve $svc: " . _retryReason($album, \@leg1)
-                    . " for artist '$artist' — retrying on album '$album'");
+                    . " for artist '$artist' — retrying on album '$album'") if _verbose();
                 $runLeg->($qaChars, $qaBytes, 'album', sub { $self->($self, @_) });
                 return;
             }
@@ -4436,7 +4470,9 @@ sub _cacheStream {
 # year only, so Troye Sivan's *She's the Best* single (Aug 2026) and album (Oct 2026) are the
 # same row to this key — the album was discarded HERE, before `_rowPick` could ever see it, and
 # the Autosmile title leg's album would have gone the same way. A size the service did not state
-# is '' on both sides, so without counts this collapses exactly what it did before.
+# is '' on both sides, so without counts this collapses exactly what it did before. The pair it
+# now keeps is VISIBLE wherever a list of matches is drawn (reviewDetail), so it is labelled
+# there by size — `_sizeLabelSameTitled`.
 sub _dedupeStreamItems {
     my ($items) = @_;
     my (%seen, @out);

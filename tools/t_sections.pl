@@ -94,6 +94,8 @@ my %EN = (
     PLUGIN_PITCHFORKREVIEWS_VIEW_SCORE        => 'Score',
     PLUGIN_PITCHFORKREVIEWS_EMPTY             => 'No reviews found',
     PLUGIN_PITCHFORKREVIEWS_GENRE_OTHER       => 'Other',
+    PLUGIN_PITCHFORKREVIEWS_SIZE_SINGLE       => 'Single',
+    PLUGIN_PITCHFORKREVIEWS_SIZE_ALBUM        => 'Album',
 );
 # Browse.pm imported cstring at compile time, so its OWN alias is what must be swapped.
 no warnings 'redefine', 'once';
@@ -128,13 +130,41 @@ print "--- detail page: three sections ---\n";
     is('...and the link last',             $it[7]{name}, 'Read the full review');
     is('nothing else',                     scalar(@it), 8);
     ok('the album row is still playable',  $it[3]{type} eq 'playlist');
-
     # THE trap: reviewDetail is a coderef sub-feed, so it never receives
     # `features` and can only know this from the row's stash. If that stash stops
     # being read, every header here silently degrades to plain text on Material
     # and nothing else about the page changes.
     ok('all three headers render as real dividers, not text',
        3 == grep { $_->{name} =~ /^(Options|Streaming|Review)$/ && $_->{type} ne 'text' } @it);
+}
+
+print "--- detail page: a same-titled single and album say which is which (1.0.7) ---\n";
+{
+    # The live pair (Troye Sivan, She's the Best): Qobuz labels both from artist + title + year,
+    # and since 1.0.3 the dedupe keeps both. A row that rendered past BUILD_DEADLINE opens this page.
+    my %lbl = (name => "Troye Sivan - She's the Best", line2 => 'Troye Sivan (2026)',
+               type => 'playlist', _svc => 'Qobuz');
+    my ($alb, $sgl) = ({ %lbl, _size => 'album' }, { %lbl, _size => 'single' });
+    my @s = grep { ($_->{_svc} // '') eq 'Qobuz' } detail($REVIEW, [ $alb, $sgl ], 1);
+    is('two stream rows',                  scalar(@s), 2);
+    is('the album says Album',             $s[0]{line2}, "Troye Sivan (2026) \x{b7} Album");
+    is('the single says Single',           $s[1]{line2}, "Troye Sivan (2026) \x{b7} Single");
+    is('the LABEL is untouched (LL door)', $s[1]{name}, "Troye Sivan - She's the Best");
+    is('the cached node is not written',   $sgl->{line2}, 'Troye Sivan (2026)');
+    ok('still playable',                   $s[1]{type} eq 'playlist');
+
+    # CONTROLS — nothing else on the page changes.
+    my @c = grep { ($_->{_svc} // '') eq 'Qobuz' } detail($REVIEW,
+        [ { %lbl, _size => 'album' }, { %lbl, name => 'Troye Sivan - Bloom', _size => 'single' } ], 1);
+    is('CONTROL: different titles get no word',  $c[0]{line2} . '|' . $c[1]{line2},
+       'Troye Sivan (2026)|Troye Sivan (2026)');
+    my @u = grep { ($_->{_svc} // '') eq 'Qobuz' } detail($REVIEW, [ { %lbl }, { %lbl, _size => 'single' } ], 1);
+    is('CONTROL: an unknown size gets no word, its twin does', $u[0]{line2} . '|' . $u[1]{line2},
+       "Troye Sivan (2026)|Troye Sivan (2026) \x{b7} Single");
+    my @t = grep { $_->{_svc} } detail($REVIEW, [ { %lbl, _size => 'album' }, { %lbl, _svc => 'TIDAL', _size => 'single' } ], 1);
+    is('CONTROL: the same label on two services gets no word', $t[0]{line2} . '|' . $t[1]{line2},
+       'Troye Sivan (2026)|Troye Sivan (2026)');
+
 }
 
 print "--- detail page: an empty Streaming section is omitted, not shown empty ---\n";

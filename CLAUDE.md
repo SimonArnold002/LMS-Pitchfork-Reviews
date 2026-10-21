@@ -59,6 +59,9 @@ because line numbers rot on the next edit.
 | A title-track single takes the row from its album (2 of 68 live rows, 2026-10-21) — BUILT 1.0.3 (`_candSize` size on every match; `_rowPick`, `_dedupeStreamItems`, `_releaseAlts`, `_wantsTitleRetry` size-aware), INSTALLED + VERIFIED LIVE 2026-10-21; inline review the same day: two comment/placement fixes (built as 1.0.4), residuals stated in `## Status: 1.0.3` | B | `A TITLE-TRACK SINGLE TAKES THE ROW FROM ITS ALBUM` |
 | Code review of 1.0.4: `_singleStandIn` stand-in held 1 d (FIXED, BUILT 1.0.5); `$resolve` priority-first vs size (DECLINED, Simon "leave it"); `_releaseAlts` edition offered by size and `_reviewIsEp` on derived titles — verified in code, NO WRITER (68 live rows, 633-title corpus), not fixed | Status 1.0.4 | `CODE REVIEW 2026-10-21 (Simon: "/code-review of PFR")` |
 | Code review of 1.0.5: retry log line said "loose" for an exact single (FIXED, `_retryReason`); stand-in cost comment 2 vs 2 x N (FIXED); lower-service stand-in untested (PINNED) — fix records, not suppressions | Status 1.0.6 | `CODE REVIEW OF 1.0.5 2026-10-21` |
+| Code review of 1.0.6: reviewDetail same-titled pair (FIXED, `_sizeLabelSameTitled`, a 1.0.3 regression — the 1.0.3 "reached only by an unmatched row" line was WRONG); `_retryReason` untitled + debug-off cost (FIXED); `_wantsTitleRetry` "only two" comment (FIXED); 3e `$standIn` walk (PINNED) — fix records, not suppressions | Status 1.0.7 | `CODE REVIEW OF 1.0.6 2026-10-21` |
+| `_reviewIsEp` on YEAR-END LIST entries (heading drops " EP"?) — CLEARED on evidence: list headings keep it (2024 Djrum, `t_yearlist`) | B | `A YEAR-END LIST ENTRY KEEPS` |
+| `_releaseAlts` size branch keys on (title, size), so a second same-titled single is not offered — NO WRITER; offering both would show identical rows | B | `_releaseAlts' SIZE BRANCH OFFERS ONE` |
 | `_reviewIsEp` on a review titled exactly `EP` (bare `ep`, Yaeji `EP/EP2` side) reads as an album review — NO WRITER, declined | B | `A REVIEW TITLED EXACTLY "EP" READS AS AN ALBUM` |
 | `_singleStandIn` re-runs `_exactFolded` / `_releaseKey` / `_norm` after `_rowPick` / `_wantsTitleRetry` already did — wasted work, declined (keeps ONE predicate) | B | `_singleStandIn` RE-RUNS `_exactFolded`` |
 | `_reviewIsEp` hand-writes the trailing-EP rule `_stripFmt` owns (drift risk) — they agree today, pinned by `t_releaserank` 5d2; `_stripFmt` is a FLEET sub, not to be edited for this | B | `_reviewIsEp` AND `_stripFmt` ARE TWO RULES` |
@@ -231,6 +234,22 @@ always with its reason, and those stay suppressed. The code a fix added is new a
 
 ### B. KNOWN-OPEN AND ACCEPTED — do not re-report as new
 
+- **A YEAR-END LIST ENTRY KEEPS PITCHFORK'S TRAILING " EP" — CHECKED AND CLEARED (code review of 1.0.6,
+  finding 2, 2026-10-21).** The worry: `_reviewIsEp` was measured on review pages only, so a list heading
+  that dropped the word would make an EP read as an album (stand-in retry, 1-day hold, row lost to a
+  same-titled album). Cleared on evidence: list headings use the same `<em>Title</em> EP` markup — the 2024
+  list's `["h2","Djrum: ",["em","Meaning's Edge"]," EP"]` is the measured case, `_headingParts` keeps the
+  trailing text on the album by design (API.pm trap 3), and `t_yearlist` pins `Meaning's Edge EP`. Not
+  re-measured across every list this round (one measured heading + the parser's design). Re-raise only with a named list entry
+  that is an EP and whose heading lacks it.
+- **_releaseAlts' SIZE BRANCH OFFERS ONE RELEASE PER (TITLE, SIZE) — NO WRITER, NOT FIXED (code review of
+  1.0.6, finding 6, 2026-10-21).** Two same-titled singles (a 2019 one and this year's title track) beside
+  the album: only the first in service order is offered. Verified in code. No live case: the 7 size offers
+  measured 2026-10-21 are each ONE single under its album. Offering both is not the fix either: an alt's
+  label is `artist - <svc title>` and its line2 `Also released · Single`, so the two would be identical-
+  looking rows (the very thing 1.0.7 removed from reviewDetail); telling them apart needs the year on
+  line2 or picking by date. Same class as `Status 1.0.4` item 3 (edition offered by size). Re-raise only
+  with a named live row.
 - **A REVIEW TITLED EXACTLY "EP" READS AS AN ALBUM REVIEW — NO WRITER, DECLINED (code review of
   1.0.5, finding 3, 2026-10-21).** `_reviewIsEp('EP')` is 0: `_norm` gives `ep`, the rule needs a
   space before it. `_stripFmt` does not fold a bare `ep` either, so the two AGREE — the title IS the
@@ -667,6 +686,43 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
+## Status: 1.0.7 — the 1.0.6 code review's fixes (dev BUILT 2026-10-21, NOT installed, committed to dev)
+
+**CODE REVIEW OF 1.0.6 2026-10-21 (Simon: "lets do another /code-review", then "verify and look to fix").**
+Scope `be1da4f` + `9991e86` (both unpushed), clean tree. Seven findings, each verified in code; the code
+ones anti-tested on mutated scratch copies (`PFR_BROWSE=`). No change to what a row plays, no
+`STREAM_KEY_VERSION` bump (28): nothing cached changes meaning.
+1. **FIXED — a 1.0.3 REGRESSION: reviewDetail showed a same-titled single and album as two identical
+   rows.** `_dedupeStreamItems` keeps the pair since 1.0.3 (Qobuz labels from artist + title + year), and
+   the 1.0.3 "checked and cleared" line that ruled it out was wrong (corrected in place, `Status 1.0.3`).
+   New `_sizeLabelSameTitled` (beside `%ALT_SIZE_TOKEN`): on reviewDetail's Streaming list, a row whose
+   (svc, name, line2) another row shares gets ` · Single`/`EP`/`Album` on line2 — only then, never the
+   label, on a COPY. Unknown size gets no word. `t_sections`: the Troye pair + 3 controls (different
+   titles, unknown size, same label on two services) + cached node unwritten. Anti-tested: call site
+   removed 3 fails; in-place write 1 fail. Live check owed: needs a row drawn past the deadline.
+2. **CLEARED ON EVIDENCE: `_reviewIsEp` on year-end list entries** — §B `A YEAR-END LIST ENTRY KEEPS`.
+3. **FIXED: `_retryReason` counted an untitled candidate as loose.** Now `N untitled match(es)`, the
+   distinction `_wantsTitleRetry` draws. No live writer (all four adapters set `_svctitle`). Anti-tested
+   (old sub, 2 fails).
+4. **FIXED (comment): `_wantsTitleRetry` said "Two shapes qualify, and only two"** and described the
+   0.9.27 loose case in stand-in words. Now three shapes, the loose one named by its Interpol case.
+5. **PINNED: 3e did not walk `_streamTtl`'s `$standIn`.** New walk over all 141 cells x {no flags, every
+   service `empty_unverified`}: a winning cell is UNVALIDATED, a no-winner cell is exactly its unflagged
+   value; plus "the flag changes some cell". Anti-tested: flag deleted 7 fails; flag read above the
+   `$nitems` test fails ONLY the walk — the 5e point test cannot see it because STREAM_NOMATCH_TTL and
+   STREAM_UNVALIDATED_TTL are both a day.
+6. **NO WRITER, NOT FIXED: `_releaseAlts` offers one release per (title, size)** — §B `_releaseAlts' SIZE
+   BRANCH OFFERS ONE`.
+7. **FIXED: `_retryReason` ran with debug off** (`_dbgv`'s gate runs after its argument is built). The
+   call site now ends `if _verbose()`. Pinned: debug off -> not built, the retry still runs (2 queries).
+   Anti-tested (gate removed, 1 fail).
+**Tests 1,429 -> 1,444, all 16 suites green (exit 0 each).**
+**Packaged (Simon: "build and commit"):** `install.xml`/`repo.xml` 1.0.7 (1.0.5 is installed); zip 26
+entries, 316,867 bytes; `repo.xml <sha>` `2b5807e09dffba5cc6d11390ef545a6f68a71f3a`; unzipped `diff -r`
+identical to the tree; `t_releaserank`/`t_sections`/`t_reviewintro`/`t_perf` green against the extracted
+Browse.pm. No cache reset: nothing cached changes meaning. This commit also carries the 1.0.6 build's
+committed content unchanged. Live check owed: item 1, on a row drawn past BUILD_DEADLINE.
+
 ## Status: 1.0.6 — the 1.0.5 code review's fixes (dev BUILT 2026-10-21, NOT installed, committed to dev)
 
 **CODE REVIEW OF 1.0.5 2026-10-21 (Simon: "/code-review pfr", then "verify all and look to fix").** Scope
@@ -854,9 +910,11 @@ title, so both are strict-exact or neither, and it promotes the first, which `_r
 there; `_findPlayableSubtitle` filters with `grep` and keeps order; `_rebuildStreamItems` and
 `_cacheStream` carry `_size` (plain scalar); `_releaseAlts` on a cache hit gets sizes; the size alt's
 favurl is the single's own (`_attachFavUrl` per item), so a Listen Later add saves the single;
-`_refreshMatchRow` renders no list, and `reviewDetail` is reached only by an unmatched row, so the
-size-aware dedupe can show no identical-looking pair anywhere; the size word is on line2 only (the LL
-door). `matcher_sync_check.py`: the nine shared subs hash identical before and after; its exit 1 is the
+`_refreshMatchRow` renders no list; the size word is on line2 only (the LL door). **WRONG, corrected by
+the 1.0.6 code review (finding 1):** this line also said "`reviewDetail` is reached only by an unmatched
+row, so the size-aware dedupe can show no identical-looking pair anywhere". Unmatched AT RENDER is not
+unmatched by the resolver: a row past BUILD_DEADLINE (any cold warm) draws unmatched, and its detail page
+resolves and lists the pair as two identical rows. Fixed in 1.0.7 (`_sizeLabelSameTitled`). `matcher_sync_check.py`: the nine shared subs hash identical before and after; its exit 1 is the
 pre-existing `_albumMatches` drift (Gate 1). All 16 suites green, 1,391.
 **Known and NOT addressed, stated residuals (no field case behind any of them):**
 - **An album review prefers album-sized only over SINGLE-sized.** An exact EP-sized candidate ahead of
