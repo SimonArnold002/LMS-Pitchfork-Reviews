@@ -57,6 +57,11 @@ because line numbers rot on the next edit.
 | `_wantsTitleRetry` will NOT be widened with `_matchExactness` (declined 0.9.29) | B | ``_wantsTitleRetry` will NOT be widened with` |
 | The Qobuz search payload's `release_type` availability is UNVERIFIED | B | `The Qobuz search payload's `release_type`` |
 | A title-track single takes the row from its album (2 of 68 live rows, 2026-10-21) — BUILT 1.0.3 (`_candSize` size on every match; `_rowPick`, `_dedupeStreamItems`, `_releaseAlts`, `_wantsTitleRetry` size-aware), INSTALLED + VERIFIED LIVE 2026-10-21; inline review the same day: two comment/placement fixes (built as 1.0.4), residuals stated in `## Status: 1.0.3` | B | `A TITLE-TRACK SINGLE TAKES THE ROW FROM ITS ALBUM` |
+| Code review of 1.0.4: `_singleStandIn` stand-in held 1 d (FIXED, BUILT 1.0.5); `$resolve` priority-first vs size (DECLINED, Simon "leave it"); `_releaseAlts` edition offered by size and `_reviewIsEp` on derived titles — verified in code, NO WRITER (68 live rows, 633-title corpus), not fixed | Status 1.0.4 | `CODE REVIEW 2026-10-21 (Simon: "/code-review of PFR")` |
+| Code review of 1.0.5: retry log line said "loose" for an exact single (FIXED, `_retryReason`); stand-in cost comment 2 vs 2 x N (FIXED); lower-service stand-in untested (PINNED) — fix records, not suppressions | Status 1.0.6 | `CODE REVIEW OF 1.0.5 2026-10-21` |
+| `_reviewIsEp` on a review titled exactly `EP` (bare `ep`, Yaeji `EP/EP2` side) reads as an album review — NO WRITER, declined | B | `A REVIEW TITLED EXACTLY "EP" READS AS AN ALBUM` |
+| `_singleStandIn` re-runs `_exactFolded` / `_releaseKey` / `_norm` after `_rowPick` / `_wantsTitleRetry` already did — wasted work, declined (keeps ONE predicate) | B | `_singleStandIn` RE-RUNS `_exactFolded`` |
+| `_reviewIsEp` hand-writes the trailing-EP rule `_stripFmt` owns (drift risk) — they agree today, pinned by `t_releaserank` 5d2; `_stripFmt` is a FLEET sub, not to be edited for this | B | `_reviewIsEp` AND `_stripFmt` ARE TWO RULES` |
 | `_searchSpotify`: an errored Spotty search reads as a real miss (no zero-raw-results rule) | B | `_searchSpotify` TREATS AN EMPTY SPOTTY ANSWER` |
 | `_searchSpotify`: no `hasCredentials` branch; account stays keyed per service | B | `_searchSpotify` HAS NO `hasCredentials` BRANCH` |
 | `pace_warm`: warm backs off only while Spotify refuses (429); always-on pacing REJECTED as too slow | B | `PACED_WARM_GAP` / `pace_warm`: THE WARM RUNS AT FULL WIDTH` |
@@ -226,6 +231,26 @@ always with its reason, and those stay suppressed. The code a fix added is new a
 
 ### B. KNOWN-OPEN AND ACCEPTED — do not re-report as new
 
+- **A REVIEW TITLED EXACTLY "EP" READS AS AN ALBUM REVIEW — NO WRITER, DECLINED (code review of
+  1.0.5, finding 3, 2026-10-21).** `_reviewIsEp('EP')` is 0: `_norm` gives `ep`, the rule needs a
+  space before it. `_stripFmt` does not fold a bare `ep` either, so the two AGREE — the title IS the
+  word, not a format suffix. The only field shape is the `EP` side of Yaeji's combined `EP/EP2`, which
+  is the derived-title class (`Status 1.0.4` item 4: an EP flag on a side would bake into a SHARED
+  stream key), and Qobuz's `q=EP` returns raw=0 (0.9.21 entry), so nothing reaches the branch. A
+  hand-built `EP` candidate proves the branch, never the population. Re-raise only with a live row.
+- **`_singleStandIn` RE-RUNS `_exactFolded` (and through it `_releaseKey`/`_norm`, plus `_reviewIsEp`)
+  after `_rowPick` / `_wantsTitleRetry` already tested exactness — DECLINED (code review of 1.0.5,
+  finding 4).** Wasted work only, microseconds over a handful of candidates, the same class as
+  `Status 1.0.4` item 6 (`_releaseKey($album)` per candidate, not changed). The duplicate call is the
+  price of ONE predicate: 1.0.5 consolidated two hand-kept copies into `_singleStandIn` on purpose, and
+  inlining `_size eq 'single'` back into the callers re-creates them. Not a finding.
+- **`_reviewIsEp` AND `_stripFmt` ARE TWO RULES FOR ONE SUFFIX — ACCEPTED, PINNED (code review of
+  1.0.5, finding 5).** Measured on 12 spellings (`Foo EP`, `- EP`, `-EP`, `ep.`, `E.P.`, `(EP)`, `LP`,
+  bare `EP`, `EP2`, `Deep`, `Sweep`, plain): identical verdicts. `_stripFmt` is a FLEET matcher sub
+  (pinned in `matcher_sync_check.py`), so rebuilding `_reviewIsEp` on it, or editing `_stripFmt` to
+  export its regex, is a fleet change for a hypothetical drift. The agreement is asserted per spelling
+  in `t_releaserank` 5d2 (anti-tested); a drift FAILS THE SUITE, so it cannot ship silently. Not a
+  finding unless that suite is red.
 - **A stale `%UNAVAIL_SINCE` record is NOT a defect — "Refresh streaming match" clears it
   (withdrawn 0.9.32 review).** Raised as: the record is cleared only by `_svcHasHandler`, so
   against a warm store a later outage could compute a delta of hours and be called STANDING at
@@ -642,6 +667,76 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
+## Status: 1.0.6 — the 1.0.5 code review's fixes (dev BUILT 2026-10-21, NOT installed, committed to dev)
+
+**CODE REVIEW OF 1.0.5 2026-10-21 (Simon: "/code-review pfr", then "verify all and look to fix").** Scope
+`be1da4f` + the 1.0.5 tree. Six findings; each verified in code, and the code ones anti-tested on a mutated
+scratch copy (`PFR_BROWSE=`). No behaviour change to what a row plays; no `STREAM_KEY_VERSION` bump (28).
+1. **FIXED: the title-retry debug line said `N loose match(es)` for an exact single standing in for the
+   album** (the 1.0.3 widening of `_wantsTitleRetry`). New `_retryReason` names the shape: `no hit`,
+   `N exact single(s) standing in for the album`, `N loose match(es)`, or both joined by ` + `. Loose-only
+   keeps the 0.9.27 wording. Anti-tested: old wording 1 fail, `$stand = 0` 3 fails.
+2. **FIXED (comment): `_streamTtl`'s stand-in note said "two searches a day per such row".** True only on
+   the top service; a lower winner means the top service's two empty legs plus the fan-out's two legs on
+   every other service, up to 2 x N. Pinned: the two-service case runs 4 queries. Line in `Status 1.0.4`
+   item 1 (the Deezer residual) corrected too.
+3. **NO WRITER, NOT FIXED: a review titled exactly `EP` (Yaeji `EP/EP2`'s side) reads as an album review.**
+   Measured: neither `_reviewIsEp` nor `_stripFmt` treats a bare `ep` as a format word, so they agree; the
+   only field case is a combined side (1.0.4 item 4's derived-title class, same shared-key cost to fix), and
+   `q=EP` returns raw=0 on Qobuz (0.9.21 entry). Re-raise only with a live row.
+4. **NOT CHANGED: `_rowPick` / `_wantsTitleRetry` call `_exactFolded`, then `_singleStandIn` calls it
+   again.** Wasted work only (1.0.4 item 6's class); the duplicate call is the price of ONE predicate, which
+   1.0.5 consolidated on purpose — inlining `_size eq 'single'` back into the callers re-creates the
+   hand-kept copies.
+5. **PINNED, NO CODE CHANGE: `_reviewIsEp` hand-writes the trailing-EP rule `_stripFmt` owns.** Probed 12
+   spellings (`Foo EP`, `- EP`, `-EP`, `ep.`, `E.P.`, `(EP)`, `LP`, bare `EP`, `EP2`, `Deep`, `Sweep`): they
+   agree on all of them today. `_stripFmt` is a FLEET matcher sub (pinned in `matcher_sync_check.py`), so
+   `_reviewIsEp` cannot be rebuilt on it without a fleet change; `t_releaserank` 5d2 now asserts the
+   agreement per spelling. Anti-tested (`/ep$/`, 5 fails).
+6. **PINNED: no test drove a stand-in won BELOW the top service.** `t_releaserank` 5d: lower service's
+   stand-in -> UNVALIDATED, is the row, 4 queries; below an `empty_unverified` empty answer -> UNVALIDATED;
+   CONTROL lower service's album via leg 2 -> FOUND, album first. Anti-tested: `$standIn` off the top
+   service's list 3 fails, honoured only at `$win == 0` 1 fail. (Already covered before: a `$standIn` read
+   from the raw merged list fails the existing "album found by leg 2 keeps FOUND" control.)
+**Tests 1,406 -> 1,429, all 16 suites green.**
+**Packaged (Simon: "build new version and commit"):** `install.xml`/`repo.xml` 1.0.6 (1.0.5 is installed);
+zip 26 entries, 316,012 bytes; `repo.xml <sha>` `31f61af88f667582d1a9731b662ec61616f87351`; unzipped `diff -r`
+identical to the tree; `t_releaserank`/`t_reviewintro`/`t_perf` green against the extracted Browse.pm. No cache
+reset: nothing cached changes meaning. This commit also carries 1.0.5 (installed + verified live, was
+uncommitted). The declined findings 3-5 have their own §B entries and index rows. Live check owed: none
+behavioural; the new log wording shows only on a retry, and no live row is in the stand-in state.
+
+## Status: 1.0.5 — a single standing in for the album is held a day, not thirty (dev BUILT 2026-10-21, INSTALLED 14:57 restart + VERIFIED LIVE 15:14, uncommitted)
+
+The code review of 1.0.4 (findings + verdicts: `CODE REVIEW 2026-10-21` under 1.0.4 below). Simon: "leave it
+[#2] lets roll out the other fixes", and yes to a version bump. Carries finding 1 (`_singleStandIn`, one
+predicate for `_rowPick` / `_wantsTitleRetry` / `$resolve`; `_streamTtl` 6th argument -> UNVALIDATED), which
+also closes finding 5, and finding 7 (the `_candSize` Deezer comment). Findings 3 and 4 are verified, no
+writer, not fixed; 2 declined. **No `STREAM_KEY_VERSION` bump** (stays 28): the live walk found no stored
+answer in the stand-in state. `install.xml`/`repo.xml` 1.0.5; zip 26 entries, 581,945 bytes uncompressed;
+`repo.xml <sha>` `0c0b8cfa2820b17fe141051ae6c4e9a9195fd3bd`; unzipped `diff -r` identical to the tree; all
+16 suites green (1,406), also against the extracted Browse.pm. **Live check owed:** with debug on, a resolve
+line reading `UNVALIDATED (an exact single stands in for the album, 86400s)` appears only for such a row
+(none on the 2026-10-21 feed), and the 68 matched rows are unchanged.
+**LIVE CHECK 2026-10-21, part 1 (read-only, Dining Room, all players stopped):** installed version read as
+1.0.5 (`material-skin plugins`); sections 0-2 re-fetched and diffed against the pre-install snapshot: same
+row and match counts (30/29, 29/29, 30/29), **0 rows changed release**. Forced Refresh (`$force`, cache read
+skipped) on Troye, Autosmile, Deafheaven, SML, Ambarchi: all five keep the same release (Troye 12 tracks,
+Autosmile 11, each still offering `· Single`; Deafheaven 3, SML 2, Ambarchi 2, no alts). NOT yet shown: the
+resolve lines themselves — `debug_log` cannot be set over jsonrpc off-network ("Access to settings is
+restricted to the local network"), and a forced Refresh answered in 0.07s, so whether it reached Qobuz or the
+Qobuz plugin's own search cache is unproven. The stand-in branch has no live row to exercise; it is pinned
+by `t_releaserank` 5d only.
+**LIVE CHECK part 2, 15:14 (Simon switched `debug_log` on; read via `log.txt?lines=5000` — the plain
+`log.txt` view returns only ~50 lines):** the five forced Refreshes DID run the full resolve (Qobuz's own
+search cache answered in 1-4ms, which is why Refresh looked instant). Lines, all with NO `UNVALIDATED`
+tag (= STREAM_FOUND_TTL): Troye `matched on Qobuz (2) exact size=album`; Autosmile `(2) exact size=album`;
+Deafheaven `(1) loose size=single` with ONE query (the EP exemption: no stand-in, no retry, kept FOUND;
+"loose" is the strict `_matchExactness` log tag, the folded test is exact); SML leg 1 loose -> title retry
+(the 0.9.27 loose-only rule, unchanged) -> `exact size=album`; Ambarchi `(1) exact size=album`. **No
+"stands in" line anywhere — as designed.** 1.0.5 VERIFIED LIVE for every shape the feed holds; the stand-in
+branch itself awaits a field row.
+
 ## Status: 1.0.4 — 1.0.3 plus the inline review's two comment fixes (dev BUILT 2026-10-21, NOT installed, committed to dev)
 
 Simon: "rebuild and commit to dev", and yes to a version bump (1.0.3 was installed, so new bytes under
@@ -651,6 +746,47 @@ comment/placement fixes recorded in its INLINE REVIEW below: no code line moved,
 `install.xml`/`repo.xml` 1.0.4; zip 26 entries, 579,201 bytes; `repo.xml <sha>`
 `47004c4abb26b6aeb4d9512af14025ac588cd3d4`; unzipped `diff -r` identical to the tree; all 16 suites green
 (1,391) on the tree, and `t_releaserank`/`t_reviewintro`/`t_perf` green against the extracted Browse.pm.
+
+**CODE REVIEW 2026-10-21 (Simon: "/code-review of PFR"), scope `be1da4f` (1.0.4); then (Simon: "verify they
+are a problem first, then look at fixing those") each verified against the real code (scratch probe on the
+`t_releaserank` harness) and a paced read-only live walk of every matched drill-in (68 unique Qobuz rows,
+Dining Room, all players stopped).**
+1. **FIXED, BUILT 1.0.5: `_streamTtl` / `_singleStandIn` — a single standing
+   in for the album was pinned `STREAM_FOUND_TTL`.** Reproduced: leg 1 + leg 2 both return only the exact
+   single on an album review -> cached 2,592,000s. Writer: a pre-release single on the service before its
+   album (§B shape (a); the "review that lands before the release" rule, t_perf section 12). Fix: ONE
+   predicate `_singleStandIn` (exact + single-sized + review not EP) now read by `_rowPick`,
+   `_wantsTitleRetry` AND `$resolve`, which passes it to `_streamTtl` as a 6th argument -> UNVALIDATED (1 d).
+   Log line gains `UNVALIDATED (an exact single stands in for the album, …)`. **Cost measured before
+   building: 0 of 68 live rows** (only 1-3 track rows: SML + Ambarchi, album by duration; Deafheaven, EP
+   exempt). No `STREAM_KEY_VERSION` bump: no stored entry holds the shape. Residual: Deezer has no duration,
+   so a 1-3 track long album there re-resolves daily (2 searches/day/row on the top service, up to 2 x N
+   when a lower one holds it — corrected by the 1.0.5 code review, finding 2); rig has no Deezer. Tests 1,391 ->
+   1,406, all 16 green; anti-tested 7 ways (TTL branch 4, call site 3, EP 5, exactness 2, size 27, `_rowPick` 8,
+   retry 7). Finding 5 (the duplicated rule) is closed by the same predicate.
+2. **DECLINED 2026-10-21 (Simon: "leave it"): `$resolve` priority-first** — an exact single on the top
+   service settles the resolve; a lower service's album is never searched. NOT a regression: the highest-
+   priority match has always won (pre-0.8.8 too); 1.0.3 made only the within-service pick size-aware.
+   Ramifications weighed before declining: the row would leave the user's ranked service; the lower win
+   would need a 1-day hold (else it pins the lower service 30 d after the top one gets the album); the
+   fallback needs every service answered; the four-timeout worst case on those rows; `_releaseAlts` must
+   stay one-service. Re-raise only with a named live row in this state. Reproduced (Qobuz single + TIDAL album ->
+   Qobuz queried twice, TIDAL never). Pre-existing (0.8.8 design), not a 1.0.3 regression; with fix 1 the
+   row is at least re-checked daily on the top service.
+3. **VERIFIED IN CODE, NO WRITER, NOT FIXED: `_releaseAlts` size branch offers an EDITION.** Reproduced:
+   `Foo` ep-sized + `Foo (Deluxe Edition)` album-sized -> offered "· Album" (`_releaseKey` folds both). Live:
+   13 alt offers, the 7 size ones all a SINGLE under its album; no edition pair in any of the 68 drill-ins.
+   If a case appears, the rule that keeps all 7: when two titles differ only by edition wording, offer by
+   size only when one side is single-sized (a single is never an edition of a longer record).
+4. **VERIFIED IN CODE, NO WRITER, NOT FIXED: `_reviewIsEp` on derived titles** (`Foo: The Bar EP` ->
+   base `Foo`; `Foo / Bar EP` -> sides `Foo` | `Bar EP`). None of the 633 titles of the 0.9.38 corpus (6
+   with ": ") nor today's three feeds has the shape. **A fix has a cost elsewhere:** derived titles resolve
+   under SHARED stream keys (`_subtitleBase`'s note), so passing an EP flag down would bake an EP pick into an
+   entry a review titled exactly `Foo` also reads; the safe route is resolving `Foo EP` under its own key.
+6. `_releaseKey($album)` per candidate — not changed (wasted work only). 7. **FIXED:** the `_candSize`
+   comment now states the full Deezer cost (extra search, 1-day hold, extra row, the row itself).
+**Checked and cleared:** the size alt rows cannot collide as Material duplicate titles — they keep
+`type => 'playlist'`, so they are playable and carry an `item_id`.
 
 ## Status: 1.0.3 — a same-titled single no longer takes an album review's row, and is offered (dev BUILT 2026-10-21, INSTALLED + VERIFIED LIVE the same day, uncommitted)
 

@@ -1052,8 +1052,103 @@ my $TROYE = "She's the Best";
     is('leg 2 finds no album: the single still plays', ($r->{items}[0] || {})->{_size}, 'single');
     is('...listed once',                          scalar(@{ $r->{items} }), 1);
 
+    # 1.0.5: THE STAND-IN IS HELD A DAY, NOT THIRTY. The retry exists because an exact single on an
+    # album review means the album is missing; pinning the single for STREAM_FOUND_TTL kept it
+    # missing for a month after the service got it (the code review of 1.0.4, finding 1).
+    my $UNVAL = $B->can('STREAM_UNVALIDATED_TTL')->();
+    is('...and is held a DAY, so the album is picked up', ttl_written(), $UNVAL);
+    resolve('@', 'Autosmile', Qobuz => { script => [ [ scand('Autosmile', 'single', '@') ], [] ] });
+    is('leg 2 answers empty: same hold',          ttl_written(), $UNVAL);
+    resolve('@', 'Autosmile', Qobuz => { script => [ [], [ scand('Autosmile', 'single', '@') ] ] });
+    is('only leg 2 had the single: same hold',    ttl_written(), $UNVAL);
+    # CONTROLS — every shape that is NOT a stand-in keeps the thirty days.
+    resolve('Deafheaven', 'Bomb EP', Qobuz => { script => [ [ scand('Bomb', 'single', 'Deafheaven') ] ] });
+    is('CONTROL: an EP review\'s single-sized EP keeps FOUND', ttl_written(), $FOUND);
+    resolve('@', 'Autosmile', Qobuz => { script => [ [ scand('Autosmile', undef, '@') ] ] });
+    is('CONTROL: unknown size keeps FOUND',       ttl_written(), $FOUND);
+    resolve('@', 'Autosmile', Qobuz => { script => [ [ scand('Autosmile', 'ep', '@') ] ] });
+    is('CONTROL: an EP-sized exact keeps FOUND',  ttl_written(), $FOUND);
+    resolve('@', 'Autosmile', Qobuz => { script => [
+        [ scand('Autosmile', 'single', '@') ], [ scand('Autosmile', 'album', '@') ] ] });
+    is('CONTROL: the album found by leg 2 keeps FOUND (its single behind it)', ttl_written(), $FOUND);
+    resolve('@', 'Autosmile', Qobuz => { script => [
+        [ scand('Autosmile (Live)', 'single', '@') ], [ scand('Autosmile (Live)', 'single', '@') ] ] });
+    is('CONTROL: a LOOSE single is not a stand-in (0.9.29 table unchanged)', ttl_written(), $FOUND);
+
+    my $si = $B->can('_singleStandIn');
+    ok('_singleStandIn: exact single, album review',  $si->('Autosmile', scand('Autosmile', 'single')));
+    ok('_singleStandIn: not on an EP review',        !$si->('Bomb EP',   scand('Bomb', 'single')));
+    ok('_singleStandIn: not a loose single',         !$si->('Autosmile', scand('Autosmile (Live)', 'single')));
+    ok('_singleStandIn: not an album',               !$si->('Autosmile', scand('Autosmile', 'album')));
+    ok('_singleStandIn: not an unknown size',        !$si->('Autosmile', scand('Autosmile')));
+    my $st = $B->can('_streamTtl');
+    my $A  = $B->can('OUTCOME_ANSWERED')->();
+    is('_streamTtl: the flag shortens a checked winner',   $st->([$A], 1, 0, 1, [0], 1), $UNVAL);
+    is('_streamTtl: ...and only with items (a miss is still NOMATCH)',
+        $st->([$A], 1, undef, 0, [0], 1), $B->can('STREAM_NOMATCH_TTL')->());
+
     resolve('Deafheaven', 'Bomb EP', Qobuz => { script => [ [ scand('Bomb', 'single', 'Deafheaven') ] ] });
     is('an EP review pays no second search',      scalar(queries()), 1);
+
+    # 1.0.6 (code review of 1.0.5, finding 6): A STAND-IN WON BELOW THE TOP SERVICE. Every case above
+    # is one service, so `$win` is 0 and the stand-in sits first in the raw list too; a `$standIn` read
+    # off the TOP service's list, or honoured only when `$win` is 0, passed all of them.
+    reset_svc();
+    resolve('@', 'Autosmile',
+        Aqobuz => { priority => 1, script => [ [], [] ] },
+        Btidal => { priority => 2, script => [ [ scand('Autosmile', 'single', '@') ], [] ] });
+    is('a LOWER service\'s stand-in is held a day too', ttl_written(), $UNVAL);
+    is('...it is the row',                        (cached_titles())[0], 'Autosmile');
+    # The figure `_streamTtl`'s note states (finding 2): both legs on both services, not two.
+    is('...and costs both legs on BOTH services (2 x N, not 2)', scalar(queries()), 4);
+    resolve('@', 'Autosmile',
+        Aspot  => { priority => 1, script => [ [], [] ], extra => { empty_unverified => 1 } },
+        Bqobuz => { priority => 2, script => [ [ scand('Autosmile', 'single', '@') ], [] ] });
+    is('a stand-in below an unverifiable empty answer: a day', ttl_written(), $UNVAL);
+    resolve('@', 'Autosmile',
+        Aqobuz => { priority => 1, script => [ [], [] ] },
+        Btidal => { priority => 2, script => [ [ scand('Autosmile', 'single', '@') ],
+                                                [ scand('Autosmile', 'album', '@') ] ] });
+    is('CONTROL: the lower service\'s album found by leg 2 keeps FOUND', ttl_written(), $FOUND);
+    is('...and takes the row',                    ($WROTE[-1]{items}[0] || {})->{_size}, 'album');
+
+    # 1.0.6 (finding 1): THE RETRY'S DEBUG LINE NAMES THE SHAPE THAT FIRED IT. It said "loose" for an
+    # exact single standing in for the album, which is the opposite of what it is.
+    my $why = $B->can('_retryReason');
+    is('_retryReason: nothing',                   $why->('Autosmile', []), 'no hit');
+    is('_retryReason: an exact single',           $why->('Autosmile', [ scand('Autosmile', 'single') ]),
+        '1 exact single(s) standing in for the album');
+    is('_retryReason: loose only (the 0.9.27 wording kept)',
+        $why->('Autosmile', [ scand('Autosmile (Live)', 'single'), scand('Autosmiles', 'album') ]),
+        '2 loose match(es)');
+    is('_retryReason: both',                      $why->('Autosmile', [ scand('Autosmile', 'single'),
+                                                                        scand('Autosmile (Live)', 'album') ]),
+        '1 exact single(s) standing in for the album + 1 loose match(es)');
+    my @lines;
+    {
+        no warnings 'redefine';
+        local *Plugins::PitchforkReviews::Browse::_verbose = sub { 1 };
+        local *Plugins::PitchforkReviews::Plugin::dbg      = sub { push @lines, $_[0] };
+        resolve('@', 'Autosmile', Qobuz => { script => [ [ scand('Autosmile', 'single', '@') ], [] ] });
+    }
+    my ($line) = grep { /retrying on album/ } @lines;
+    ok('the live line says exact single, not loose',
+        scalar(defined $line && $line =~ /1 exact single\(s\) standing in/ && $line !~ /loose/));
+}
+{
+    # 1.0.6 (code review of 1.0.5, finding 5): `_reviewIsEp` and `_stripFmt` must agree on what a
+    # trailing EP is. `_stripFmt` is a FLEET matcher sub (pinned in matcher_sync_check.py), so
+    # `_reviewIsEp` cannot share its code; the agreement is pinned here instead. If either learns a
+    # spelling the other does not, an EP review is folded to match its EP but judged as an album.
+    print "5d2. _reviewIsEp agrees with _stripFmt on every spelling\n";
+    my ($isEp, $norm, $strip) = map { $B->can($_) } qw(_reviewIsEp _norm _stripFmt);
+    for my $t ('Foo EP', 'Foo - EP', 'Foo-EP', 'Foo ep.', 'Foo E.P.', 'Foo (EP)', 'Foo LP', 'Foo',
+               'EP', 'EP2', 'Deep', 'Foo Sweep') {
+        my $n = $norm->($t);
+        my $s = $strip->($n);
+        my $foldsEp = ($s ne $n && $n =~ /ep$/) ? 1 : 0;
+        is("'$t': _reviewIsEp = _stripFmt folds an EP", $isEp->($t), $foldsEp);
+    }
 }
 {
     print "5e. the offer — the other size is another release\n";

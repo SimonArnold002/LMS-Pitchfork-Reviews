@@ -3211,7 +3211,10 @@ sub _exactFolded {
 # DURATION IS LOAD-BEARING, measured on the live feed 2026-10-21: SML's *Spontaneous Music Live*
 # (2 tracks, 48 min) and Oren Ambarchi's *Cooked* (2 tracks, 43 min) are albums, and a count-only
 # rule calls them singles. Deezer's search rows carry no duration, so there a 1-3 track record of
-# any length reads `single` — which, below, only ever costs one extra search or one extra row.
+# any length reads `single`. On an album review that costs one extra title search per resolve, a
+# one-day hold instead of thirty when it still wins the row (`_singleStandIn`), an extra row offered,
+# and, when a same-titled album-sized release is also a candidate, the row itself: `_rowPick` plays
+# that release instead. Stated residual, ledger `## Status: 1.0.3`; none seen, and the rig has no Deezer.
 #
 # WHAT IT IS FOR, AND WHAT IT IS NOT. It decides what to OFFER and, between two candidates with the
 # SAME title, which one the row plays. It never drops a candidate (the 0.9.27 decision: ledger B,
@@ -3269,6 +3272,19 @@ sub _reviewIsEp {
     return _norm($album) =~ /\sep$/ ? 1 : 0;
 }
 
+# A SINGLE STANDING IN FOR THE ALBUM: an exact-titled candidate that is single-sized, on a review
+# that does not say EP. ONE predicate, read by every place that acts on that shape — `_rowPick`
+# passes over it, `_wantsTitleRetry` searches past it, and `$resolve` holds a row it still won for
+# STREAM_UNVALIDATED_TTL rather than STREAM_FOUND_TTL. They were two hand-kept copies until the third
+# reader arrived; the `$finish` merge proof depends on all of them agreeing. Cheapest test first:
+# most candidates are not single-sized, and those never reach the two `_norm` calls.
+sub _singleStandIn {
+    my ($album, $it) = @_;
+    return 0 unless ref $it eq 'HASH' && ($it->{_size} // '') eq 'single';
+    return 0 unless _exactFolded($album, $it);
+    return _reviewIsEp($album) ? 0 : 1;
+}
+
 # WHICH CANDIDATE THE ROW PLAYS, as an index into `$items` (1.0.3; 0.9.27's promotion widened).
 #
 # 0.9.27: an EXACT title beats a loose one (Interpol's album over *…/See Out Loud*). That cannot
@@ -3286,10 +3302,8 @@ sub _rowPick {
     return 0 unless ref $items eq 'ARRAY' && @$items;
     my @ex = grep { _exactFolded($album, $items->[$_]) } 0 .. $#$items;
     return 0 unless @ex;
-    unless (_reviewIsEp($album)) {
-        for my $i (@ex) {
-            return $i if (($items->[$i] || {})->{_size} // '') ne 'single';
-        }
+    for my $i (@ex) {
+        return $i unless _singleStandIn($album, $items->[$i]);
     }
     return $ex[0];
 }
@@ -3317,19 +3331,31 @@ sub _rowPick {
 # search, only on such rows — none of the 68 live Qobuz rows on 2026-10-21 once Qobuz's own fix
 # is counted. Unknown size is not single, so a service stating no counts never pays it. Size, not
 # `_matchExactness` — the widening declined in 0.9.29 is a different one and stays declined.
+# When the title leg finds no album either, the single still plays — and is held one day, not
+# thirty (`_streamTtl`'s stand-in branch), so the album is picked up once the service carries it.
 sub _wantsTitleRetry {
     my ($album, $res) = @_;
     return 0 unless defined $res && ref $res eq 'ARRAY';
     return 1 unless @$res;                                    # nothing found at all
-    my $ep = _reviewIsEp($album);
     my $stated = 0;
     for my $it (@$res) {
         # one exact is enough to settle — unless it is a single standing in for an album
-        return 0 if _exactFolded($album, $it) && ($ep || (($it->{_size} // '') ne 'single'));
+        return 0 if _exactFolded($album, $it) && !_singleStandIn($album, $it);
         $stated++ if ref $it eq 'HASH' && defined $it->{_svctitle}
                   && !ref $it->{_svctitle} && length $it->{_svctitle};
     }
     return $stated ? 1 : 0;
+}
+
+# What the artist leg held when `_wantsTitleRetry` fired, in the words the debug line uses: the
+# three shapes above, counted. Only reached on a retry, and only to build that line.
+sub _retryReason {
+    my ($album, $leg1) = @_;
+    return 'no hit' unless ref $leg1 eq 'ARRAY' && @$leg1;
+    my $stand = grep { _singleStandIn($album, $_) } @$leg1;
+    my $loose = @$leg1 - $stand;
+    return join(' + ', ($stand ? "$stand exact single(s) standing in for the album" : ()),
+                       ($loose ? "$loose loose match(es)"                          : ()));
 }
 
 # Real service matches out of a _findPlayable answer. _streamResult NEVER returns an
@@ -3677,6 +3703,8 @@ sub _serveWaiters {
 #   winner, leg 2 had no API handler           UNVALIDATED   (was:  $unvalidated[$win])
 #   winner, an `empty_unverified` service
 #     above it did not win (0.9.36)            UNVALIDATED   (new — see the note in the sub)
+#   winner, the row is a single standing in
+#     for the album (`$standIn`, 1.0.5)         UNVALIDATED   (new — see the note in the sub)
 #   no winner, any transient failure           INCONCLUSIVE  (was:  $inconclusive)
 #   no winner, every service unavailable       INCONCLUSIVE  (was:  $unavailable == @adapters)
 #   no winner, some unavailable + some missed  NOMATCH
@@ -3695,9 +3723,21 @@ sub _serveWaiters {
 # INCONCLUSIVE — matching the old `0 == 0`, and the right answer anyway, though
 # `_findPlayable` returns before this on that path.
 sub _streamTtl {
-    my ($outcome, $nadapters, $win, $nitems, $unverified) = @_;
+    my ($outcome, $nadapters, $win, $nitems, $unverified, $standIn) = @_;
 
     if ($nitems) {
+        # A SINGLE STANDING IN FOR THE ALBUM STILL WON THE ROW (1.0.5). `_wantsTitleRetry` already
+        # treats an exact single on an album review as evidence the album is MISSING, and searched
+        # the title for it; when that search found no album either, the single plays — but it is
+        # the same state as a review that lands before the release (ledger, t_perf section 12): the
+        # answer is expected to change, so it is held a day and the warm looks again. Pinned for
+        # thirty days it was §B shape (a)'s cost surviving the 1.0.3 fix. Measured before it was
+        # built, 2026-10-21: 0 of 68 live Qobuz rows are in this state (the only 1-3 track rows are
+        # SML and Ambarchi, album-sized by duration, and the Deafheaven EP, exempt), so it costs
+        # nothing today. The cost while it lasts, per such row per day: two searches when the stand-in
+        # is on the top-priority service; when a LOWER one holds it, the top service's two legs ran
+        # empty first and the fan-out ran both legs on every other service, so up to 2 x N.
+        return STREAM_UNVALIDATED_TTL if $standIn;
         # AN UNVERIFIABLE EMPTY ANSWER ABOVE THE WINNER (0.9.36). A service flagged
         # `empty_unverified` cannot tell "not in my catalogue" from "my API refused you": Spotty's
         # Pipeline turns a 502, a timeout and a 429 into the same `[]` as a genuine zero-hit. When
@@ -3967,8 +4007,11 @@ sub _findPlayable {
         # carries the whole truth table and the note on why it is not inline any more.
         # $resolve does not reach here until every adapter has reported (the loop above
         # returns on the first undef `$result[$i]`), so @outcome is complete by construction.
+        # Read AFTER `_rowPick`: a stand-in at index 0 means no exact non-single was there to take
+        # the row (`_rowPick` would have put it first), so the album really is missing here.
+        my $standIn = @$items ? _singleStandIn($album, $items->[0]) : 0;
         my $ttl = _streamTtl(\@outcome, scalar(@adapters), $win, scalar(@$items),
-                             [ map { $_->{empty_unverified} ? 1 : 0 } @adapters ]);
+                             [ map { $_->{empty_unverified} ? 1 : 0 } @adapters ], $standIn);
         # A failed cache write must not take the ANSWER with it. The callers below are
         # waiting on a result we already hold; the worst case of not storing it is that the
         # next open re-resolves. (Same guard, same reason, as API.pm's fetch sites — see the
@@ -3991,6 +4034,9 @@ sub _findPlayable {
                               . ' size=' . (($items->[0] || {})->{_size} // '?')
                               . ((($outcome[$win] // '') ne OUTCOME_ANSWERED)
                                     ? ' UNVALIDATED (leg 2 never answered, '
+                                      . STREAM_UNVALIDATED_TTL . 's)'
+                                 : $standIn
+                                    ? ' UNVALIDATED (an exact single stands in for the album, '
                                       . STREAM_UNVALIDATED_TTL . 's)'
                                  : ($ttl == STREAM_UNVALIDATED_TTL)
                                     ? ' UNVALIDATED (a higher-priority service\'s empty answer is unverifiable, '
@@ -4229,7 +4275,9 @@ sub _findPlayable {
             if ($wantAlbumLeg && !$legs++ && _wantsTitleRetry($album, $res)) {
                 @leg1 = @$res;
                 Slim::Utils::Timers::killSpecific($svcTimer) if $svcTimer;
-                _dbgv("resolve $svc: " . (@leg1 ? scalar(@leg1) . ' loose match(es)' : 'no hit')
+                # SAY WHICH SHAPE FIRED IT (1.0.6). Since 1.0.3 an exact single standing in for the
+                # album fires the retry too, and "loose" described it as the opposite of what it is.
+                _dbgv("resolve $svc: " . _retryReason($album, \@leg1)
                     . " for artist '$artist' — retrying on album '$album'");
                 $runLeg->($qaChars, $qaBytes, 'album', sub { $self->($self, @_) });
                 return;
