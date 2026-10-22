@@ -48,9 +48,6 @@ BEGIN {
     sub putList { my ($k,$i,$v)=@_; return 0 unless ref $i eq 'ARRAY' && @$i;
                   $LISTS{$k}=$i; $VER{$k}=$v; $AGE{$k}=0; 1 }
     sub listAge    { exists $LISTS{$_[0]} ? ($AGE{$_[0]} // 0) : undef }
-    sub forget     { delete $LISTS{$_[0]}; delete $AGE{$_[0]}; delete $VER{$_[0]}; 1 }
-    sub forgetAll  { %LISTS=(); %AGE=(); %VER=(); 1 }
-    sub storedKeys { sort keys %LISTS }
     sub reset_db   { %LISTS=(); %AGE=(); %VER=(); kvReset(); }
     # KV SIDE (0.9.11) — the resolve cache, the newest-year answer and the negative
     # markers all live here now, not in Slim::Utils::Cache. A REAL in-memory store:

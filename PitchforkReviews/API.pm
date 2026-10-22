@@ -94,7 +94,7 @@ use constant LATEST_TTL      => 30 * 86400;
 use constant LATEST_WAIT_TTL => 12 * 3600;
 use constant PUBLISH_MONTH   => 10;                # 0-based: from November, this year's list may exist
 # How long a FAILED answer is held. Without these every home-shelf render, tile
-# open and daily warm re-runs the whole sweep — getLatestYear probes _topYear
+# open and warm tick re-runs the whole sweep — getLatestYear probes _topYear
 # down to YEAR_MIN, and each probe is a getYearList fetch of a ~1.7MB article, so
 # a slug change or an outage costs ~10-21 large HTTP requests EVERY time. Kept
 # deliberately short: long enough to stop the storm, far shorter than the 12h
@@ -480,7 +480,7 @@ sub getYearList {
 # THIS is what makes the feature self-updating: it probes down from the newest
 # year that could exist and remembers the answer. While the current year's list
 # is still awaited the answer is held for only LATEST_WAIT_TTL, so the December
-# publication is picked up within hours — the daily warm re-probes on its own, so
+# publication is picked up within hours — the warm (every 3h) re-probes on its own, so
 # it promotes even if nobody opens the menu. Once the newest possible year IS
 # published there is nothing newer to find, so the answer is cached hard.
 sub getLatestYear {
@@ -540,8 +540,8 @@ sub getLatestYear {
 # The newest year IF it is already known, without ever fetching. For callers that
 # must answer synchronously — the top-level menu builds its tiles inline, and
 # blocking the whole app menu on a 1.7MB article fetch to label one tile would be
-# a bad trade. Returns undef until something (a feed open, or the daily warm) has
-# resolved it; the caller falls back to the generic label.
+# a bad trade. Returns undef until something (a feed open, or the warm) has
+# resolved it. Read by warmCache for the top of the back-catalogue range.
 # `|| undef` collapses the 0 negative sentinel (see getLatestYear) back to "not
 # known", which is what a caller falling back to a generic label expects.
 sub cachedLatestYear { return Plugins::PitchforkReviews::DB::kvGet('pfr:year:latest:4') || undef; }

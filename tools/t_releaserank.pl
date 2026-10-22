@@ -68,7 +68,6 @@ BEGIN {
     $INC{'Plugins/PitchforkReviews/DB.pm'} = __FILE__;
     package Plugins::PitchforkReviews::DB;
     sub getList { undef } sub putList { 1 } sub listAge { undef }
-    sub forget { 1 } sub forgetAll { 1 } sub storedKeys { () }
     # kvSet RECORDS rather than discarding (0.9.29), because the TTL a resolve chooses is
     # itself an assertion now — see section 3b. kvGet still returns undef, so nothing is
     # ever SERVED from here and the assertions above stay non-vacuous.
@@ -1178,29 +1177,54 @@ my $TROYE = "She's the Best";
     }
     is('debug off: the reason is not built', $built, 0);
     is('...and the retry still ran (two legs)', scalar(@QUERIES), 2);
+
+    # 1.0.9 (code review of 1.0.8, finding 2): the per-resolve line is gated the same way. It runs on
+    # every resolve (~180 per warm), and its `_matchExactness` + `size=` pieces were built and then
+    # discarded with debug off. CONTROL: with debug on it is built, and the row still matches.
+    for my $v (0, 1) {
+        my $ex = 0;
+        {
+            no warnings 'redefine';
+            my $real = $B->can('_matchExactness');
+            local *Plugins::PitchforkReviews::Browse::_verbose        = sub { $v };
+            local *Plugins::PitchforkReviews::Browse::_matchExactness = sub { $ex++; $real->(@_) };
+            local *Plugins::PitchforkReviews::Plugin::dbg             = sub { };
+            resolve('@', 'Autosmile', Qobuz => { script => [ [ scand('Autosmile', 'album', '@') ] ] });
+        }
+        is($v ? 'CONTROL: debug on, the resolve line is built' : 'debug off: the resolve line is not built',
+           $ex ? 1 : 0, $v);
+        is('...and the row still matched', (cached_titles())[0], 'Autosmile');
+    }
 }
 {
     # 1.0.8 (code review of 1.0.7, finding 6): `_wantsTitleRetry` and `_retryReason` read ONE
     # classification (`_leg1Shape`), so the debug line cannot describe a different shape from the one
-    # that fired the retry. Each case pins the retry decision AND that it is exactly the shape's.
+    # that fired the retry. Each case pins the retry decision, and every case that retries pins
+    # `_retryReason`'s wording too (1.0.9, code review of 1.0.8: the second check used to recompute
+    # `_wantsTitleRetry`'s own formula, so a `_retryReason` that drifted from it stayed green).
+    # `_retryReason` is only ever called on a retry, so a case that settles has no wording to pin.
     print "5d3. _leg1Shape — the retry and its wording share one classification\n";
-    my ($shape, $want) = ($B->can('_leg1Shape'), $B->can('_wantsTitleRetry'));
+    my ($want, $why) = ($B->can('_wantsTitleRetry'), $B->can('_retryReason'));
     for my $c (
         [ 'an exact album settles',              'Autosmile',    [ scand('Autosmile', 'album') ],          0 ],
-        [ 'an exact single stands in',           'Autosmile',    [ scand('Autosmile', 'single') ],         1 ],
-        [ 'loose only retries',                  'Autosmile',    [ scand('Autosmile (Live)', 'album') ],   1 ],
+        [ 'an exact single stands in',           'Autosmile',    [ scand('Autosmile', 'single') ],         1,
+          '1 exact single(s) standing in for the album' ],
+        [ 'loose only retries',                  'Autosmile',    [ scand('Autosmile (Live)', 'album') ],   1,
+          '1 loose match(es)' ],
         [ 'untitled only does not (no evidence)', 'Autosmile',   [ { name => 'x', _size => 'album' } ],    0 ],
         [ 'a stand-in then the album settles',   'Autosmile',    [ scand('Autosmile', 'single'),
                                                                    scand('Autosmile', 'album') ],          0 ],
-        [ 'loose + untitled retries',            'Autosmile',    [ scand('Autosmiles', 'album'), { name => 'x' } ], 1 ],
+        [ 'loose + untitled retries',            'Autosmile',    [ scand('Autosmiles', 'album'), { name => 'x' } ], 1,
+          '1 loose match(es) + 1 untitled match(es)' ],
+        [ 'a stand-in + loose + untitled retries', 'Autosmile',  [ scand('Autosmile', 'single'),
+                                                                   scand('Autosmile (Live)', 'album'), { name => 'x' } ], 1,
+          '1 exact single(s) standing in for the album + 1 loose match(es) + 1 untitled match(es)' ],
         [ 'an unknown-size exact settles',       'Autosmile',    [ scand('Autosmile') ],                   0 ],
         [ 'an EP review: an exact single settles', 'Autosmile EP', [ scand('Autosmile', 'single') ],       0 ],
     ) {
-        my ($label, $album, $res, $exp) = @$c;
-        my $s = $shape->($album, $res);
+        my ($label, $album, $res, $exp, $words) = @$c;
         is("retry: $label", $want->($album, $res), $exp);
-        is("...and it is the shape's own verdict",
-           ((!$s->{settled} && ($s->{stand} || $s->{loose})) ? 1 : 0), $exp);
+        is("...and _retryReason words that shape", $why->($album, $res), $words) if $exp;
     }
 
     # 1.0.8 (finding 3): a SELF-TITLED review runs no title leg — the artist search already was that

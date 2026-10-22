@@ -88,7 +88,6 @@ sub _warmRetryDelay {
 }
 
 sub _resetWarmBackoff { $_warmFails = 0; return }   # test seam
-sub _warmFailCount    { return $_warmFails }        # test seam
 
 my $log = Slim::Utils::Log->addLogCategory({
     'category'     => 'plugin.pitchforkreviews',
@@ -233,10 +232,10 @@ sub postinitPlugin {
         } or $log->error("Failed to register Material home extras: $@");
     }
 
-    # Pre-resolve the two listings to streaming shortly after startup, then daily,
-    # so the home shelves (and browse lists) open from a warm cache instead of
-    # running an up-to-18s resolve live on the Material home carousel. Delayed so
-    # it doesn't compete with boot; the whole build benefits (not just Material).
+    # Pre-resolve the lists to streaming shortly after startup, then every
+    # WARM_INTERVAL, so the home shelves (and browse lists) open from a warm store
+    # instead of running a live resolve on the Material home carousel. WARM_DELAY
+    # is short on purpose (see its note above); the whole build benefits.
     Slim::Utils::Timers::setTimer(undef, time() + WARM_DELAY, \&_warmTick);
 
     return;

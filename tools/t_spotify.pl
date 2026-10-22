@@ -66,7 +66,6 @@ BEGIN {
     $INC{'Plugins/PitchforkReviews/DB.pm'} = __FILE__;
     package Plugins::PitchforkReviews::DB;
     sub getList { undef } sub putList { 1 } sub listAge { undef }
-    sub forget { 1 } sub forgetAll { 1 } sub storedKeys { () }
     sub kvGet { undef } sub kvSet { 1 } sub kvDel { 1 }
     sub kvForgetPrefix { 0 } sub kvCount { 0 } sub kvReset { }
 }

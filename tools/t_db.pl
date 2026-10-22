@@ -156,23 +156,9 @@ section 'a HALF-WRITTEN list reads as absent, never as a short list';
        scalar(grep { /DB holds 21 rows but meta says 50/ } @T::Log::WARNED) == 1);
 }
 
-section 'forget / storedKeys';
-
-$NS->can('putList')->('year:2019', [ map { yearItem($_) } 1 .. 3 ], 1);
-$NS->can('putList')->('bnm',       [ feedItem(1) ], 1);
-my @keys = $NS->can('storedKeys')->();
-ok('storedKeys lists what is held', scalar(grep { $_ eq 'year:2019' } @keys) == 1);
-
-$NS->can('forget')->('year:2019');
-ok('forget drops the list', !defined $NS->can('getList')->('year:2019', 1));
-{
-    my $h = $NS->can('dbh')->();
-    my ($n) = $h->selectrow_array("SELECT COUNT(*) FROM list_item WHERE list_key = 'year:2019'");
-    is('...and its rows, not just its meta row', $n, 0);
-}
-
 section 'listAge';
 
+$NS->can('putList')->('bnm', [ feedItem(1) ], 1);
 ok('a stored list has an age', defined $NS->can('listAge')->('bnm'));
 ok('...that is fresh', $NS->can('listAge')->('bnm') < 5);
 ok('an absent list has no age', !defined $NS->can('listAge')->('nope'));

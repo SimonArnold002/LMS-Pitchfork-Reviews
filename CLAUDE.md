@@ -3,13 +3,14 @@
 ## Project Overview
 A Lyrion Music Server plugin that browses curated album reviews and plays each
 reviewed album from the user's streaming library. **v1 source: Pitchfork** (Best
-New Music + Latest Reviews, parsed from the listing pages' embedded Verso state —
-see Architecture). Each review resolves to a directly-playable album on Qobuz /
-Tidal / Deezer, reusing the album-match engine from the sibling **ListenBrainz
-Fresh Releases** plugin. Pure Perl, async, **no extra server software**
+New Music, High Scoring Albums and Latest Reviews, parsed from the listing pages'
+embedded Verso state, plus the Best Albums of the Year lists parsed from the year-end
+articles — see Architecture). Each review resolves to a directly-playable album on
+Qobuz / Tidal / Deezer / Spotify (via Spotty), reusing the album-match engine from the
+sibling **ListenBrainz Fresh Releases** plugin. Pure Perl, async, **no extra server software**
 (cross-platform). Targets LMS 9.x + Material Skin.
 
-Design decisions live in the auto-memory note `album-reviews-plugin-scope`.
+Design decisions live in this ledger and the auto-memory note `pitchfork-reviews-plugin`.
 
 ## Review Ledger — READ THIS BEFORE REPORTING ANY FINDING
 
@@ -61,7 +62,9 @@ because line numbers rot on the next edit.
 | Code review of 1.0.5: retry log line said "loose" for an exact single (FIXED, `_retryReason`); stand-in cost comment 2 vs 2 x N (FIXED); lower-service stand-in untested (PINNED) — fix records, not suppressions | Status 1.0.6 | `CODE REVIEW OF 1.0.5 2026-10-21` |
 | Code review of 1.0.6: reviewDetail same-titled pair (FIXED, `_sizeLabelSameTitled`, a 1.0.3 regression — the 1.0.3 "reached only by an unmatched row" line was WRONG); `_retryReason` untitled + debug-off cost (FIXED); `_wantsTitleRetry` "only two" comment (FIXED); 3e `$standIn` walk (PINNED) — fix records, not suppressions | Status 1.0.7 | `CODE REVIEW OF 1.0.6 2026-10-21` |
 | Code review of 1.0.7: size-offered single vs LL's `artist\|album\|year` dedupe (DECLINED, Simon: LL treats singles and albums differently; LL not touched); `_sizeLabelSameTitled` empty line2 (NO WRITER, guarded via `_sizeLine2`); `_streamTtl` self-titled comment (FIXED); `_streamLabelKey` / `_sizeLine2` / `_leg1Shape` one copy each (FIXED) | Status 1.0.8 | `CODE REVIEW OF 1.0.7 2026-10-21` |
+| Code review of 1.0.8: 1.0.8 Status heading said NOT installed (FIXED); resolve `_dbgv` line built with debug off (FIXED, `if _verbose()`); 5d3 never called `_retryReason` (FIXED); 1-day stand-in hold vs warm cadence and `_leg1Shape` partial counts (CLEARED, §B) | Status tree | `CODE REVIEW OF 1.0.8 2026-10-22` |
 | `_releaseAlts` size alt + Listen to Later dedupe key (`&a=`/`&al=`/`&y=` same as the album row) — DECLINED, LL-side, LL out of scope | B | `A SIZE-OFFERED SINGLE AND LISTEN TO LATER'S` |
+| `_streamTtl` stand-in 1-day hold vs the warm cadence; `_leg1Shape` stops counting at a settling match — CLEARED on evidence (warm is 3 h; `_retryReason` never reached on a settled leg) | B | `THE STAND-IN HOLD AND THE WARM CADENCE` |
 | `_reviewIsEp` on YEAR-END LIST entries (heading drops " EP"?) — CLEARED on evidence: list headings keep it (2024 Djrum, `t_yearlist`) | B | `A YEAR-END LIST ENTRY KEEPS` |
 | `_releaseAlts` size branch keys on (title, size), so a second same-titled single is not offered — NO WRITER; offering both would show identical rows | B | `_releaseAlts' SIZE BRANCH OFFERS ONE` |
 | `_reviewIsEp` on a review titled exactly `EP` (bare `ep`, Yaeji `EP/EP2` side) reads as an album review — NO WRITER, declined | B | `A REVIEW TITLED EXACTLY "EP" READS AS AN ALBUM` |
@@ -236,6 +239,16 @@ always with its reason, and those stay suppressed. The code a fix added is new a
 
 ### B. KNOWN-OPEN AND ACCEPTED — do not re-report as new
 
+- **THE STAND-IN HOLD AND THE WARM CADENCE, AND `_leg1Shape`'S PARTIAL COUNTS — `_streamTtl`
+  `STREAM_UNVALIDATED_TTL`, `_singleStandIn`, `WARM_INTERVAL`, `_leg1Shape`, `_retryReason`. CHECKED AND
+  CLEARED (code review of 1.0.8, 2026-10-22).** (a) The worry: a stand-in single held 1 day re-resolves only
+  when a daily warm reaches it. Wrong premise: `Plugin.pm` `WARM_INTERVAL` is `3 * 3600` (matches
+  `API::FEED_TTL`), so the warm runs every 3 h and an expired hold is re-searched within 3 h of lapsing. (b)
+  The worry: `_leg1Shape` returns at the first settling match, so its stand/loose/untitled counts are
+  partial there and `_retryReason` would print an empty or short line. True of the sub, but no caller
+  reaches it: `_wantsTitleRetry` returns 0 on `settled`, the retry never fires, and `_retryReason` is called
+  only at the retry site. Re-raise (a) only with a changed `WARM_INTERVAL`, (b) only with a second caller of
+  `_retryReason` or `_leg1Shape` that reads counts on a settled leg.
 - **A YEAR-END LIST ENTRY KEEPS PITCHFORK'S TRAILING " EP" — CHECKED AND CLEARED (code review of 1.0.6,
   finding 2, 2026-10-21).** The worry: `_reviewIsEp` was measured on review pages only, so a list heading
   that dropped the word would make an EP read as an album (stand-in retry, 1-day hold, row lost to a
@@ -699,7 +712,47 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: 1.0.8 — the 1.0.7 code review's fixes (dev BUILT 2026-10-21, committed to dev, NOT installed)
+## Status: tree — the 1.0.8 code review's fixes (2026-10-22, NOT built, uncommitted)
+
+**CODE REVIEW OF 1.0.8 2026-10-22 (Simon: "lets do a /code-review pfr", then "verify and fix all those").**
+Scope: the four unpushed commits (`be1da4f`, `9991e86`, `f6d90d6`, `132acc7`) + tree (the uncommitted ledger
+edit). Three findings, all verified, all fixed. No change to what a row plays, no `STREAM_KEY_VERSION`
+bump (28). No version bump, no zip: not asked for.
+1. **FIXED (ledger): the `## Status: 1.0.8` heading said "NOT installed"** while its body recorded the
+   install and the live check. Heading now says INSTALLED + checked, with the sha `132acc7`.
+2. **FIXED: the per-resolve `_dbgv("resolve '...': matched on ...")` line was built with debug off**
+   (`_matchExactness` + the 1.0.3 `size=` piece on every resolve, ~180 per warm). The statement now ends
+   `if _verbose()`, the 1.0.7 item 7 pattern. Also takes one die source (`_matchExactness`, see 0.9.23
+   `runs eagerly to build the log line`) off the debug-off path. Pinned in `t_releaserank` (debug off:
+   `_matchExactness` not called, the row still matches; CONTROL debug on: called). Anti-tested (gate
+   removed, 1 fail).
+3. **FIXED (test): `t_releaserank` 5d3 never called `_retryReason`** — its second check recomputed
+   `_wantsTitleRetry`'s own formula from `_leg1Shape`. Now every 5d3 case that retries asserts
+   `_retryReason`'s exact wording, plus a new stand-in + loose + untitled case. Settling cases pin no
+   wording (`_retryReason` is only reached on a retry). Anti-tested (a `_retryReason` that words a stand-in
+   as loose: 6 fails, 2 of them in 5d3).
+**Cleared on evidence, logged in §B:** `_streamTtl`'s 1-day stand-in hold vs the warm cadence; `_leg1Shape`'s
+partial counts on a settled leg.
+**Tests 1,464 -> 1,465, all 16 suites green (exit 0 each).**
+**CLEANUP PASS, same day (Simon: "a clean up pass on any dead code and stale refs and
+documentation").** Every sub, constant, string token and image asset checked for a caller.
+Removed: `DB::forget` / `forgetAll` / `storedKeys` (no production caller; `forget`'s comment
+claimed the Refresh row used it, but Refresh goes through `force` and keeps the stored copy
+since 0.9.8) with their `t_db` section and the dead copies in 12 test harness DB stubs
+(`t_perf` keeps its own `forget` stub, which it calls as fixture cleanup); `Plugin::_warmFailCount`
+(marked test seam, no test used it). **Kept, checked:** the LMS hooks (`postinitPlugin`,
+`getDisplayName`, `playerMenu`, `page`, `beforeRender`), the test seams that tests DO use,
+`PitchforkReviewsIcon.svg` (loaded through the `_svg.png` name), `PLUGIN_PITCHFORKREVIEWS_DESC`
+(unreferenced, conventional slot, harmless). Comment references to names not in this code all
+point at LMS, the service plugins or sibling plugins, or are marked history. **Docs:** the
+current-state sections of this file (Overview, File Structure, Architecture, service
+priorities, the debug method) rewritten to match the code; the 0.8.7 `cachedLatestYear` line
+marked superseded. README / CHANGELOG / feature summary NOT touched (written at the merge to
+main); `docs/code-review-*.md` are round records, left as written; `docs/streaming-adapter-spec.md`
+is a copy of LBF's canonical file. **Tests 1,465 -> 1,462 (the 3 `forget`/`storedKeys`
+assertions), all 16 suites green.**
+
+## Status: 1.0.8 — the 1.0.7 code review's fixes (dev BUILT 2026-10-21, committed to dev 132acc7, INSTALLED + checked live 2026-10-21, 0 rows changed)
 
 **CODE REVIEW OF 1.0.7 2026-10-21 (Simon: "lets do a /code-review of pfr", then "verify and look to fix
 these"; LL out of scope: "do not touch LL at all for this review").** Scope: the three unpushed commits
@@ -729,8 +782,14 @@ these"; LL out of scope: "do not touch LL at all for this review").** Scope: the
 **Packaged (Simon: "build and commit"):** `install.xml`/`repo.xml` 1.0.8 (1.0.7 is installed); zip 26
 entries, 317,691 bytes; `repo.xml <sha>` `e80e28eed7a91f594b7cadf45fcea6143837a383`; unzipped `diff -r`
 identical to the tree; `t_releaserank`/`t_sections`/`t_reviewintro`/`t_perf` green against the extracted
-Browse.pm. No cache reset: nothing cached changes meaning. NOT installed. Live check owed: none new (the
-changes are refactors plus a guard no live row reaches); 1.0.7's item 1 is still owed.
+Browse.pm. No cache reset: nothing cached changes meaning. Live check owed: none new (the changes are
+refactors plus a guard no live row reaches); 1.0.7's item 1 is still owed.
+**Installed 2026-10-21 (Simon); read-only check over JSON-RPC (Dining Room, every player idle):** loaded
+version 1.0.8 (`material-skin plugins`). Latest Reviews 35 rows / 29 Qobuz matches, **0 rows changed** against
+the pre-install snapshot taken the same session. Troye *She's the Best* and @ *Autosmile* drill-ins: capsule,
+link, `Another release with this name · Single` (the `_sizeLine2` path), Refresh, then the ALBUM's tracklist —
+identical to 1.0.7. Best New Music 29 matched, High Scoring Albums 29 (both as on 1.0.5), Best Albums of the
+Year 50/50, `PFRReviews` home shelf 29/30. All answered in 0-1 s.
 
 ## Status: 1.0.7 — the 1.0.6 code review's fixes (dev BUILT 2026-10-21, committed to dev f6d90d6, INSTALLED 15:56 restart; item 1 live check OWED)
 
@@ -776,6 +835,12 @@ VIEW_DEADLINE 45 s on a list, BUILD_DEADLINE 10 s on a shelf) while both release
 row's stream entry cannot be emptied over HTTP (Refresh re-pulls the feed, not the matches). Check it on the
 next cold resolve that leaves Troye or Autosmile unmatched at render. The settings plugins page returned 403
 from here this session, so the loaded version was not read from it.
+**Tried again 2026-10-21 evening, NOT reachable by switching services:** Simon put TIDAL first (it re-keys
+`_svcOrder`), and a Latest Reviews view + the `PFRReviews` home shelf fired together (the race that narrows
+the shelf) came back in 0-1 s, 29/30 matched (all `extid` tidal), Troye matched. Whether PFR re-resolved
+(service plugins' own search caches answering) or held entries for that order from before, the resolve
+beats the 10 s shelf deadline, so no row draws unmatched. Plugin prefs cannot be read or written over
+jsonrpc from off-network (the `pref` query returns empty). Do not retry the service toggle for this check.
 
 ## Status: 1.0.6 — the 1.0.5 code review's fixes (dev BUILT 2026-10-21, NOT installed, committed to dev)
 
@@ -4278,7 +4343,8 @@ uses `'parent'`; there is no longer any reason to go further.
   renders no feed that needs it). The pinned-year passthrough path in `fetchYearFeed` still
   works; nothing in the UI uses it now.
 - `API::cachedLatestYear` is now unused (it existed only to label the tile without fetching).
-  Left in place as a cache accessor.
+  Left in place as a cache accessor. **Superseded: `warmCache` reads it again** (the top of
+  the back-catalogue range, 0.9.10+), so it is live code.
 - **Tests: `t_yearlist.pl` 107 → 117** — the tile carries no year and the app menu never
   fetches to build it; the chooser's own title; no row drilling into `fetchYearFeed`;
   `'parent'` on every row and on the response; the empty item list; the stored pref; the
@@ -4856,14 +4922,17 @@ EVERY zip rebuild: bump the version (install.xml + repo.xml) AND recompute the s
 ```
 PitchforkReviews/
 ├── Plugin.pm    # OPMLBased entry point; prefs; log category
-├── API.pm       # Async Pitchfork page-state (Verso __PRELOADED_STATE__) fetch + parse + caching
-├── Browse.pm    # Browse feeds (top level, per-source feed, review detail) + the album streaming resolver + home-shelf feeds (homeBnm/homeHsa/homeReviews)
-├── HomeExtras.pm # Material Skin home-page shelves (0.6.0; PFRHsa added 0.7.0): PFRBnm + PFRHsa + PFRReviews HomeExtraBase subclasses
+├── API.pm       # Async Pitchfork fetch + parse: listing pages (Verso __PRELOADED_STATE__) and year-end articles; coalescing, stale-while-revalidate, miss markers
+├── DB.pm        # The plugin's own SQLite store (0.9.8/0.9.11): parsed lists (list_item/list_meta) + the kv table (stream matches, latest year, miss markers)
+├── Browse.pm    # Browse feeds (top level, per-source feed, year view, review detail) + the album streaming resolver + the warm + home-shelf feeds (homeBnm/homeHsa/homeReviews/homeYear)
+├── HomeExtras.pm # Material Skin home-page shelves: PFRBnm + PFRHsa + PFRReviews + PFRYear HomeExtraBase subclasses
 ├── Settings.pm  # Streaming-service priorities + debug-log toggle
 ├── strings.txt  # EN strings
 ├── install.xml  # <extension> (singular — manual-install format)
 └── HTML/EN/plugins/PitchforkReviews/settings.html
 repo.xml         # <extensions> (plural — repo-install manifest)
+tools/           # t_*.pl suites (16, run each with `perl tools/t_x.pl`), make_readme_html.py, make_covers.py
+docs/            # streaming-adapter-spec.md (canonical copy lives in the LBF repo) + per-round code-review records
 ```
 
 ## Architecture
@@ -4879,16 +4948,20 @@ repo.xml         # <extensions> (plural — repo-install manifest)
   `/reviews/albums/` (capped 30 ≈ last 2 weeks), `getBnm()` = `/reviews/best/albums/`
   (all items on that page ARE the BNM picks — the `isBestNewMusic` JSON flag is
   unreliable/false even there). `getHsa()` = `/reviews/best/high-scoring-albums/`
-  (another curated page whose items ARE the picks, uncapped like BNM). Cached
-  `pfr:listing:4` / `pfr:bnm:4` / `pfr:hsa:4` (3h + 7d fallback) — **the `:N` is the PARSE
-  version: bump all three whenever `_parseState` changes what it stores, or the old text is
-  served for up to 3h (7d if a later fetch fails).** `from_json` yields proper characters (no
+  (another curated page whose items ARE the picks, uncapped like BNM). The year-end
+  lists come from `getYearList` / `getLatestYear` (`_parseYear`, see Status 0.8.0).
+  **Stored in the plugin's own SQLite DB (`DB.pm`), not `Slim::Utils::Cache`** (0.9.8): a
+  feed is refreshed after `FEED_TTL` (3h) and served stale-while-revalidate; a failed feed
+  fetch writes a `pfr:feedmiss:<key>` marker (`FEED_MISS_TTL` 1h, `FEED_MISS_EMPTY_TTL` 60s
+  when nothing is stored); a closed year is kept for good. **`API::PARSE_VERSION` (now 3) is
+  the parse version: bump it whenever `_parseState`/`_parseYear` change what they store** — a
+  stored list carrying another version reads as absent and re-fetches. `from_json` yields proper characters (no
   mojibake), and **0.7.12** decodes HTML entities on top (`_decodeEntities`, applied via
   `_stripTags` to album/capsule and directly to artist/genre — `&amp;` in a title was
   silently unmatchable, see Status). Score is available
   but not displayed yet; full review text is never stored (linked out — copyright).
 - **Menu** (`Browse.pm`): top = Best New Music + High Scoring Albums + Latest Reviews
-  + Plugin Settings.
+  + Best Albums of the Year + Plugin Settings.
   The three feed tiles carry **branded section covers** (`menu-best-new-music.png` /
   `menu-high-scoring-albums.png` / `menu-latest-reviews.png` — light card + the red
   Pitchfork mark + bold title + red
@@ -4899,19 +4972,20 @@ repo.xml         # <extensions> (plural — repo-install manifest)
   literal escape (the 0.4.0 "odd text before the genre" fix).
   All three browse lists are divided by Material headers — by week (`pubDate`
   grouped) or by **genre** (`group_by` pref → `_genreRows`, primary Pitchfork
-  genre; genre is the default). **0.7.1:** the three source tiles share ONE feed —
+  genre; genre is the default; 0.9.42 added a flat `View: Score` mode). **0.7.1:** the three source tiles share ONE feed —
   `fetchFeed`, dispatched by `$pt->{source}` ('bnm'|'hsa'|'reviews') threaded
   through `_feedTile` (which also threads `features` so headers render) — so BNM
   and High Scoring Albums group exactly like Latest Reviews. (`fetchBnm`/`fetchHsa`
   removed; note BNM's curated ranking order is not preserved once grouped.) Divider
-  headers carry the Pitchfork `LOGO_ICON`. Each list open
-  resolves every item to streaming **during the build**
-  (`_resolveSection`, bounded concurrency 6, 18s render deadline then partial +
-  background cache-warm). All dynamic feeds return `cachetime => 0`.
-- **Home shelves** (`HomeExtras.pm` + `Browse::homeBnm`/`homeHsa`/`homeReviews`, 0.6.0;
-  hardened 0.6.1; third shelf 0.7.0): registered in `Plugin::postinitPlugin` (guarded on MaterialSkin +
-  `->can('registerHomeExtra')`, quiet no-op otherwise), three `HomeExtraBase`
-  subclasses `PFRBnm`/`PFRHsa`/`PFRReviews`. **Critical rule (ported from LBF's 0.6.11
+  headers carry `HEADER_ICON` (the `_svg.png` form; a plain png is not drawn on a header).
+  Each list open resolves every item to streaming **during the build** (`_resolveSection`,
+  `BUILD_CONCURRENCY` 10; `VIEW_DEADLINE` 45s on a browse list, a backstop so a list renders
+  complete; `BUILD_DEADLINE` 10s on a home shelf, past which it renders partial and the pump
+  keeps resolving). All dynamic feeds return `cachetime => 0`.
+- **Home shelves** (`HomeExtras.pm` + `Browse::homeBnm`/`homeHsa`/`homeReviews`/`homeYear`,
+  0.6.0; hardened 0.6.1; third shelf 0.7.0, fourth 0.8.0): registered in `Plugin::postinitPlugin`
+  (guarded on MaterialSkin + `->can('registerHomeExtra')`, quiet no-op otherwise), four
+  `HomeExtraBase` subclasses `PFRBnm`/`PFRHsa`/`PFRReviews`/`PFRYear`. **Critical rule (ported from LBF's 0.6.11
   lesson):** a home-shelf feed MUST be a FLAT card list — NO Refresh row, NO
   week/genre dividers — and must NOT vary by request quantity. Material uses the
   same feed for the carousel and its "show all" click-in and re-traverses by
@@ -4923,14 +4997,15 @@ repo.xml         # <extensions> (plural — repo-install manifest)
   matched-only made list membership vary as the resolver cache filled, so the
   carousel render and the play re-traversal saw different item_ids — the exact
   0.6.11 failure. **Background warm (0.6.1, `Browse::warmCache`):** the per-item
-  resolve is pre-warmed by `Plugin::postinitPlugin`'s warm (`WARM_DELAY` 150s after
-  boot — staggered past LBF's 60s — then daily via `_warmTick`, deferred while
-  `Slim::Music::Import->stillScanning`), so on a warm cache the home build is all
-  cache hits and returns immediately instead of making Material wait out an 18s live
-  resolve (which it can time out on → empty/hung shelf, the reason LBF never
-  resolves inside its home feeds). `warmCache` resolves getListing, getBnm, then
-  getHsa sequentially via `_resolveSection`, using the first connected player for the
-  streaming API context (a no-op with no player). Cold cache still resolves during
+  resolve is pre-warmed by `Plugin::postinitPlugin`'s warm (`WARM_DELAY` 15s after
+  startup, then every `WARM_INTERVAL` 3h = `API::FEED_TTL` via `_warmTick`, deferred while
+  `Slim::Music::Import->stillScanning`; with no player connected it retries after
+  `WARM_PLAYER_RETRY` 20s, doubling to `WARM_RETRY_MAX` 300s), so on a warm cache the home
+  build is all cache hits and returns immediately. `warmCache` fetches all four lists up
+  front (the year issued first, collected last — 0.9.18), then resolves the stages one at a
+  time via `_resolveSection` (`warm` mode: full width while no view is resolving, yields to
+  one that is), using the first connected player for the streaming API context; the nine
+  back-catalogue years follow behind it (`_backfillYears`). Cold cache still resolves during
   the build (degrades to the browse-list behaviour).
 - **Rows** (`_reviewRow`): a MATCHED item renders as the streaming album node —
   **playable from the list, with the service's album artwork** — relabelled to the
@@ -4952,13 +5027,16 @@ repo.xml         # <extensions> (plural — repo-install manifest)
   copied from the sibling plugin).
 - **Resolver** (`_findPlayable` + friends): port of the ListenBrainz album engine.
   Search the ARTIST on each enabled service (RAW query — normalisation breaks
-  stylised names) and, **since 0.7.12, the ALBUM TITLE as a second leg when a service
-  returns an empty result** (a common-word artist name like "Leo" buries the release
-  past any search cap — see Status; `undef`/inconclusive is never retried), filter by
-  `_albumMatches`, render via the service's own
-  `_albumItem`/`_renderAlbum`. Parallel, per-service watchdog, highest-priority match
-  wins. Cache `pfr:stream:3:<svc-order>:<id>` (7d found / 1d no-match / 1h
-  inconclusive), keyed by the service set so a config change re-matches.
+  stylised names) and the ALBUM TITLE as a second leg when the artist leg holds nothing,
+  only loose matches, or only an exact single standing in for an album review
+  (`_wantsTitleRetry` / `_leg1Shape`; `undef`/inconclusive is never retried), filter by
+  `_albumMatches`, pick the row with `_rowPick` (exact title, size-aware since 1.0.3), render
+  via the service's own `_albumItem`/`_renderAlbum`. **Priority-first, not parallel** (0.8.8):
+  the top-priority service is searched alone, the rest only if it does not settle it;
+  per-service watchdog `STREAM_SVC_TIMEOUT` 8s; highest-priority match wins. Stored as a DB kv
+  row `pfr:stream:<STREAM_KEY_VERSION>:<svc-order>:<id>` (version 28), keyed by the service
+  set so a config change re-matches; the TTL comes from `_streamTtl` (found 30d / no-match 1d
+  / unvalidated 1d / inconclusive 1h).
   - **Matching** (`_norm`/`_albumMatches`/`_artistMatch`, ported ~verbatim — keep in
     sync with LBF): `_norm` folds diacritics AND stylised chars (`$`→s, `€`→e, `£`→l,
     `¥`→y, `!`→i, `@`→a) so "WOR$T"=="Worst", "P!nk"=="Pink". `_albumMatches` also has
@@ -4983,8 +5061,8 @@ repo.xml         # <extensions> (plural — repo-install manifest)
 **SPEC RE-COPIED AGAIN 2026-09-16 (sha1 `f43421aa…`, identical in LBF, PFR and LL).** §6 now names PFR's implementation of the refusal rules (0.9.39): the 6th `$refused` argument to `_svcCantAnswer`, `_refused` forwarded by the subtitle and "A / B" wrappers and given to callers that joined the search, and PFR's ONE consumer (`_resolveSection` in `warm` mode — home shelves resolve on request, like a view). It also gained "keep the gap to ONE wakeup, re-armed". The PFR code this describes is in this repo's working tree — see §C `SYNCHRONOUS SPOTIFY REFUSAL AND ONE`. **Then, the same day, every `Browse.pm:NNNN` / `Settings.pm:NN` / `Sources.pm:NN` line reference was replaced by the sub or variable it points at (they had drifted — e.g. LBF's adapter table cited at 5688, now ~7069), §8's sites re-checked against current code, and §3's reference shape gained LBF's optional `ready` probe. Re-copied; sha1 `fccba6c4…` in all three.**
 
 **Qobuz + Tidal + Deezer + Spotify (via Spotty)** (Bandcamp not ported — manual/loop-blocking). **The paragraphs below predate the `rebuild` field**: where they say "reattached per service by `_svc`" or name an elsif branch, read "the adapter's own `rebuild` coderef". Priorities on
-the settings page (`svc_priority_qobuz|tidal|deezer`; 0 = never; lower = searched
-first). **The subtle bit — album nodes carry a CODEREF `url` that Storable can't
+the settings page (`svc_priority_qobuz|tidal|deezer|spotify`, defaults 1-4; 0 = never;
+lower = searched first). **The subtle bit — album nodes carry a CODEREF `url` that Storable can't
 serialise, so it's stripped on cache and reattached per service on read:**
 - All three services (Qobuz/Tidal/**Deezer**) are the SAME shape. Their `_albumItem` /
   `_renderAlbum` sets `url => <coderef>` (the browse-into-tracks handler) and keeps the
@@ -5121,11 +5199,14 @@ that cause empty/junk pools:
    BYTES. Feeding octets to Qobuz/Tidal double-encodes accents → junk/0 results (fixed 2026-07-10).
 
 **HOW TO DEBUG A SEARCH (the canonical method — stop trying variants each session):**
-1. `["pref","plugin.pitchforkreviews:debug_log","1"]` (via jsonrpc).
-2. Fire the feed once (Material, or a jsonrpc menu query with a player MAC from `["players",0,20]`).
-3. **Read the log over HTTP:** `curl -s http://plex:9000/log.txt` and grep the plugin prefix — the
-   key line names each service's candidate-pool size + samples. Empty pool = service search returned
-   nothing (encoding/availability); healthy pool + no match = a matcher gap.
+1. Turn on "Extra debug logging" on the plugin's settings page. (A jsonrpc `pref` write is refused
+   off-network: "Access to settings is restricted to the local network".)
+2. Fire the feed once (Material, or a jsonrpc menu query with a player MAC from `["players",0,20]`),
+   or use "Refresh streaming match" on one row to force a full resolve.
+3. **Read the log over HTTP:** `curl -s 'http://plex:9000/log.txt?lines=5000'` (the bare `log.txt`
+   returns only ~50 lines). The key lines: `search <Svc>/albums <ms> raw=N kept=M at=P q=…` per
+   search leg, and `resolve '<artist> / <album>': matched on … size=…` / `no match` per album.
+   raw=0 = the service search returned nothing (encoding/availability); raw>0 kept=0 = a matcher gap.
 4. Turn `debug_log` back off. Test the MB mirror directly with a `curl` to `plex:5000/ws/2/…`
    ([[mb-mirror-search-index-gotcha]]); test the library with `["artists",…,"search:NAME"]`.
 

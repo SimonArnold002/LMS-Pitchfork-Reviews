@@ -410,32 +410,4 @@ sub listAge {
     return defined $at ? (time() - $at) : undef;
 }
 
-# Drop one list — what the Refresh row does before re-fetching.
-sub forget {
-    my ($key) = @_;
-    my $h = dbh() or return 0;
-    return 0 unless defined $key && length $key;
-    eval {
-        $h->begin_work;
-        $h->do('DELETE FROM list_item WHERE list_key = ?', undef, $key);
-        $h->do('DELETE FROM list_meta WHERE list_key = ?', undef, $key);
-        $h->commit;
-        1;
-    } or do { my $e = $@; eval { $h->rollback }; $log->warn("$key: DB delete failed: $e") };
-    return 1;
-}
-
-sub forgetAll {
-    my $h = dbh() or return 0;
-    eval { $h->do('DELETE FROM list_item'); $h->do('DELETE FROM list_meta'); 1 }
-        or $log->warn("DB clear failed: $@");
-    return 1;
-}
-
-sub storedKeys {
-    my $h = dbh() or return ();
-    my $r = eval { $h->selectcol_arrayref('SELECT list_key FROM list_meta ORDER BY list_key') } || [];
-    return @$r;
-}
-
 1;

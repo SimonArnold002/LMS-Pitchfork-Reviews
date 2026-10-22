@@ -254,7 +254,7 @@ use constant STREAM_INCONCLUSIVE_TTL => 3600;        # couldn't query a service 
 # Why a day and not STREAM_INCONCLUSIVE_TTL's hour: an hour makes every list open after the
 # first re-resolve the album, and the shape that lands here is a service that HUNG — so each
 # retry costs a fresh STREAM_SVC_TIMEOUT against BUILD_DEADLINE, on every open, for as long as
-# that service stays slow. A day bounds the exposure to the daily warm, which re-resolves any
+# that service stays slow. A day bounds the exposure to the warm, which re-resolves any
 # expired entry (see the pump in _resolveSection) and validates it properly the moment the
 # service answers.
 use constant STREAM_UNVALIDATED_TTL  => 1 * 86400;   # matched, but the checking leg never answered
@@ -896,8 +896,8 @@ sub yearPicker {
 #
 # The per-item streaming resolve is pre-warmed by Plugin's background warm
 # (warmCache, below), so on a warm cache this build is all cache hits and
-# returns immediately — the home carousel never has to wait out an 18s live
-# resolve. On a cold cache (fresh install / first tick not yet run) it still
+# returns immediately — the home carousel never has to wait out a live
+# resolve to BUILD_DEADLINE. On a cold cache (fresh install / first tick not yet run) it still
 # resolves during the build, degrading to the browse-list behaviour.
 # ---------------------------------------------------------------------------
 sub homeReviews {
@@ -1010,17 +1010,17 @@ sub _setHomeYearTitle {
 }
 
 # ---------------------------------------------------------------------------
-# Background warm: pre-resolve the Latest Reviews + Best New Music listings to
-# streaming so the Material home shelves (and the browse lists) open instantly
-# instead of running an up-to-18s resolve live on the home carousel — which
-# Material can time out waiting for, leaving the shelf empty/hung (the reason
-# the sibling ListenBrainz plugin never resolves inside its home feeds either).
-# Scheduled by Plugin::postinitPlugin shortly after startup, then daily, and
-# deferred while a library scan runs. Cheap on the daily tick: _findPlayable
-# matches are cached (7d found), so real work only happens for reviews that are
-# new since the last run. Needs a connected player for the streaming-service API
-# context; a quiet no-op (resolution deferred to first open) when none is
-# connected.
+# Background warm: pre-resolve the four lists (Best New Music, High Scoring Albums,
+# Latest Reviews, the newest Best Albums of the Year) to streaming so the Material
+# home shelves (and the browse lists) open instantly instead of running a live
+# resolve on the home carousel — which Material can time out waiting for, leaving
+# the shelf empty/hung (the reason the sibling ListenBrainz plugin never resolves
+# inside its home feeds either). Scheduled by Plugin::postinitPlugin shortly after
+# startup, then every WARM_INTERVAL (3h), and deferred while a library scan runs.
+# Cheap on a warm store: _findPlayable matches are held (STREAM_FOUND_TTL, 30d), so
+# real work only happens for reviews that are new since the last run. Needs a
+# connected player for the streaming-service API context; with none it returns
+# false and _warmTick retries in seconds.
 # ---------------------------------------------------------------------------
 
 # The warm's own resolve deadline (see the note in warmCache). Declared here
@@ -4103,7 +4103,8 @@ sub _findPlayable {
                                       . STREAM_UNVALIDATED_TTL . 's)' : '')
                             : "no match" . ($nErrored ? " ($nErrored inconclusive)" : "")
                                          . ($nUnavail ? " ($nUnavail unavailable)"   : "")
-                                         . ($ttl == STREAM_NOMATCH_TTL ? '' : " ttl=$ttl")));
+                                         . ($ttl == STREAM_NOMATCH_TTL ? '' : " ttl=$ttl")))
+            if _verbose();    # 1.0.9: `_dbgv` gates after its argument is built, and this runs on every resolve
 
         # THE WAITERS ARE SERVED BEFORE $callback, AND EACH ONE IS GUARDED. $callback
         # chains into the full feed render — a lot of code, any of which can die — and the
@@ -4302,8 +4303,8 @@ sub _findPlayable {
         # makes the sub hold a reference to itself — a cycle Perl's refcounting can
         # never collect, so the closure and everything it captured leak for the life
         # of the process. That matters HERE more than anywhere else in the plugin:
-        # one is built per adapter per resolve (three services x ~150 items on the
-        # daily warm alone), and each one retains the matched album nodes through
+        # one is built per adapter per resolve (every service x ~150 items on each
+        # warm alone), and each one retains the matched album nodes through
         # $finish. Same defect and same fix as the sibling ListenBrainz plugin
         # (LBF 0.9.95). The thin wrapper handed to $runLeg captures $self but is not
         # captured BY it, so nothing points back at itself.
