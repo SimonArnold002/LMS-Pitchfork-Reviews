@@ -713,7 +713,7 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: the code review of 7b2bdf4 (2026-10-22, committed to dev as the commit after 7b2bdf4, NOT built, NOT pushed)
+## Status: the code review of 7b2bdf4 (2026-10-22, committed to dev 1691cc1 + PUSHED (round passed), NOT built)
 
 **CODE REVIEW OF 7b2bdf4 2026-10-22 (Simon: "lets do a /code-review pfr", then "verify all these then update
 them all").** Scope: `origin/dev..HEAD` (`be1da4f` .. `7b2bdf4`, five unpushed commits), clean tree. Six findings,
@@ -741,7 +741,7 @@ was already right. No version bump, no zip: not asked for.
    built; now "code review of 1.0.8".
 **Tests 1,462 -> 1,467, all 16 suites green (exit 0 each).**
 
-## Status: 7b2bdf4 — the 1.0.8 code review's fixes (2026-10-22, committed to dev 7b2bdf4, NOT built, NOT pushed)
+## Status: 7b2bdf4 — the 1.0.8 code review's fixes (2026-10-22, committed to dev 7b2bdf4, PUSHED 2026-10-22, NOT built)
 
 **CODE REVIEW OF 1.0.8 2026-10-22 (Simon: "lets do a /code-review pfr", then "verify and fix all those").**
 Scope: the four unpushed commits (`be1da4f`, `9991e86`, `f6d90d6`, `132acc7`) + tree (the uncommitted ledger
