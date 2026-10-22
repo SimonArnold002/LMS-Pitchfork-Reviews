@@ -62,7 +62,8 @@ because line numbers rot on the next edit.
 | Code review of 1.0.5: retry log line said "loose" for an exact single (FIXED, `_retryReason`); stand-in cost comment 2 vs 2 x N (FIXED); lower-service stand-in untested (PINNED) — fix records, not suppressions | Status 1.0.6 | `CODE REVIEW OF 1.0.5 2026-10-21` |
 | Code review of 1.0.6: reviewDetail same-titled pair (FIXED, `_sizeLabelSameTitled`, a 1.0.3 regression — the 1.0.3 "reached only by an unmatched row" line was WRONG); `_retryReason` untitled + debug-off cost (FIXED); `_wantsTitleRetry` "only two" comment (FIXED); 3e `$standIn` walk (PINNED) — fix records, not suppressions | Status 1.0.7 | `CODE REVIEW OF 1.0.6 2026-10-21` |
 | Code review of 1.0.7: size-offered single vs LL's `artist\|album\|year` dedupe (DECLINED, Simon: LL treats singles and albums differently; LL not touched); `_sizeLabelSameTitled` empty line2 (NO WRITER, guarded via `_sizeLine2`); `_streamTtl` self-titled comment (FIXED); `_streamLabelKey` / `_sizeLine2` / `_leg1Shape` one copy each (FIXED) | Status 1.0.8 | `CODE REVIEW OF 1.0.7 2026-10-21` |
-| Code review of 1.0.8: 1.0.8 Status heading said NOT installed (FIXED); resolve `_dbgv` line built with debug off (FIXED, `if _verbose()`); 5d3 never called `_retryReason` (FIXED); 1-day stand-in hold vs warm cadence and `_leg1Shape` partial counts (CLEARED, §B) | Status tree | `CODE REVIEW OF 1.0.8 2026-10-22` |
+| Code review of 1.0.8: 1.0.8 Status heading said NOT installed (FIXED); resolve `_dbgv` line built with debug off (FIXED, `if _verbose()`); 5d3 never called `_retryReason` (FIXED); 1-day stand-in hold vs warm cadence and `_leg1Shape` partial counts (CLEARED, §B) | Status 7b2bdf4 | `CODE REVIEW OF 1.0.8 2026-10-22` |
+| Code review of 7b2bdf4: `_findPlayableReview` requireAll promotion undid `_rowPick` on a folded-only-exact lead ("Foo EP" vs single "Foo"; no field case, FIXED, the 1.0.3 "both strict-exact or neither" clearance was WRONG for the EP/LP fold); five stale comments / ledger lines (reviewDetail "only unmatched" x3, Status heading, `cachedLatestYear`, warmCache "seconds", `# 1.0.9:` tags) FIXED — fix records, not suppressions | Status: the code review of 7b2bdf4 | `CODE REVIEW OF 7b2bdf4 2026-10-22` |
 | `_releaseAlts` size alt + Listen to Later dedupe key (`&a=`/`&al=`/`&y=` same as the album row) — DECLINED, LL-side, LL out of scope | B | `A SIZE-OFFERED SINGLE AND LISTEN TO LATER'S` |
 | `_streamTtl` stand-in 1-day hold vs the warm cadence; `_leg1Shape` stops counting at a settling match — CLEARED on evidence (warm is 3 h; `_retryReason` never reached on a settled leg) | B | `THE STAND-IN HOLD AND THE WARM CADENCE` |
 | `_reviewIsEp` on YEAR-END LIST entries (heading drops " EP"?) — CLEARED on evidence: list headings keep it (2024 Djrum, `t_yearlist`) | B | `A YEAR-END LIST ENTRY KEEPS` |
@@ -712,7 +713,35 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
 
-## Status: tree — the 1.0.8 code review's fixes (2026-10-22, NOT built, uncommitted)
+## Status: the code review of 7b2bdf4 (2026-10-22, committed to dev as the commit after 7b2bdf4, NOT built, NOT pushed)
+
+**CODE REVIEW OF 7b2bdf4 2026-10-22 (Simon: "lets do a /code-review pfr", then "verify all these then update
+them all").** Scope: `origin/dev..HEAD` (`be1da4f` .. `7b2bdf4`, five unpushed commits), clean tree. Six findings,
+each verified in the code before it was fixed. No `STREAM_KEY_VERSION` bump (28): the promotion runs on every
+answer and is never stored (a combined review has no outer cache layer, 0.9.29), and each side's own cached entry
+was already right. No version bump, no zip: not asked for.
+1. **FIXED: `_findPlayableReview`'s requireAll (unpadded split) promotion undid `_rowPick`.** It moved the first
+   STRICT-exact candidate (`_matchExactness`, plain `_norm`) to the front. `_norm` does not fold a trailing EP/LP,
+   so for side `Foo` with the single `Foo` and the 5-track `Foo EP`, `_rowPick` put the EP first and the
+   promotion put the single back. **The 1.0.3 inline review's clearance ("both are strict-exact or neither") was
+   wrong for that fold**; corrected in place. Fix: no move when the side's lead is already `_exactFolded` (that
+   lead is `_rowPick`'s choice). The GATE is unchanged: a side survives only on a strict-exact candidate. Writer:
+   none seen; the only unpadded split in the field is Yaeji `EP/EP2`. Pinned in `t_perf` (the Foo/Bar case +
+   CONTROL: a side with only `Foo EP` is still dropped). Anti-tested (fix reverted: 1 fail, row `'Foo'`).
+2. **FIXED (comments): three places said reviewDetail is reached ONLY by an unmatched row** (`_attachReviewLink`'s
+   header and its alt-row note, `_releaseAlts`' header). Now "drawn unmatched", naming the past-deadline row (the
+   1.0.6 finding the cleanup pass missed).
+3. **FIXED (ledger): the 7b2bdf4 work's heading said "NOT built, uncommitted"**; it now names the commit.
+4. **FIXED (comment): `API::cachedLatestYear`** named the top-level menu as its caller and a "generic label"
+   fallback; its one caller is `warmCache` (falls back to `$year`). The `yearsAvailable` sentence that sat above it
+   moved onto `yearsAvailable`.
+5. **FIXED (comment): the warmCache header said "retries in seconds"**; it now names the 20s -> 300s backoff
+   (`Plugin::_warmRetryDelay`).
+6. **FIXED (comments): `# 1.0.9:` tags** (Browse.pm resolve line, two in `t_releaserank`) named a version never
+   built; now "code review of 1.0.8".
+**Tests 1,462 -> 1,467, all 16 suites green (exit 0 each).**
+
+## Status: 7b2bdf4 — the 1.0.8 code review's fixes (2026-10-22, committed to dev 7b2bdf4, NOT built, NOT pushed)
 
 **CODE REVIEW OF 1.0.8 2026-10-22 (Simon: "lets do a /code-review pfr", then "verify and fix all those").**
 Scope: the four unpushed commits (`be1da4f`, `9991e86`, `f6d90d6`, `132acc7`) + tree (the uncommitted ledger
@@ -1026,7 +1055,8 @@ no behaviour change.** Scope: the whole working-tree diff (`Browse.pm`, `strings
 **Checked and cleared, so the next round need not re-derive them:** the combined "A / B" per-side
 promotion (`_matchExactness`, unpadded splits only) cannot undo `_rowPick` — the two releases share a
 title, so both are strict-exact or neither, and it promotes the first, which `_rowPick` already put
-there; `_findPlayableSubtitle` filters with `grep` and keeps order; `_rebuildStreamItems` and
+there **[WRONG for titles equal only after the EP/LP fold ("Foo EP" vs "Foo"): one is folded-exact, the
+other strict-exact, and the promotion undid `_rowPick`. Fixed by the code review of 7b2bdf4, finding 1]**; `_findPlayableSubtitle` filters with `grep` and keeps order; `_rebuildStreamItems` and
 `_cacheStream` carry `_size` (plain scalar); `_releaseAlts` on a cache hit gets sizes; the size alt's
 favurl is the single's own (`_attachFavUrl` per item), so a Listen Later add saves the single;
 `_refreshMatchRow` renders no list; the size word is on line2 only (the LL door). **WRONG, corrected by

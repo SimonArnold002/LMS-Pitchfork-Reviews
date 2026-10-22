@@ -1178,7 +1178,7 @@ my $TROYE = "She's the Best";
     is('debug off: the reason is not built', $built, 0);
     is('...and the retry still ran (two legs)', scalar(@QUERIES), 2);
 
-    # 1.0.9 (code review of 1.0.8, finding 2): the per-resolve line is gated the same way. It runs on
+    # Code review of 1.0.8, finding 2: the per-resolve line is gated the same way. It runs on
     # every resolve (~180 per warm), and its `_matchExactness` + `size=` pieces were built and then
     # discarded with debug off. CONTROL: with debug on it is built, and the row still matches.
     for my $v (0, 1) {
@@ -1200,7 +1200,7 @@ my $TROYE = "She's the Best";
     # 1.0.8 (code review of 1.0.7, finding 6): `_wantsTitleRetry` and `_retryReason` read ONE
     # classification (`_leg1Shape`), so the debug line cannot describe a different shape from the one
     # that fired the retry. Each case pins the retry decision, and every case that retries pins
-    # `_retryReason`'s wording too (1.0.9, code review of 1.0.8: the second check used to recompute
+    # `_retryReason`'s wording too (code review of 1.0.8: the second check used to recompute
     # `_wantsTitleRetry`'s own formula, so a `_retryReason` that drifted from it stayed green).
     # `_retryReason` is only ever called on a retry, so a case that settles has no wording to pin.
     print "5d3. _leg1Shape — the retry and its wording share one classification\n";

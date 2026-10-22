@@ -534,16 +534,11 @@ sub getLatestYear {
     $try->($try);
 }
 
-# Every year we can offer, newest first. YEAR_MIN is the floor: 2016 is the
-# oldest list that parses cleanly under this shape (older ones use ad-hoc slugs
-# and a different body layout).
-# The newest year IF it is already known, without ever fetching. For callers that
-# must answer synchronously — the top-level menu builds its tiles inline, and
-# blocking the whole app menu on a 1.7MB article fetch to label one tile would be
-# a bad trade. Returns undef until something (a feed open, or the warm) has
-# resolved it. Read by warmCache for the top of the back-catalogue range.
-# `|| undef` collapses the 0 negative sentinel (see getLatestYear) back to "not
-# known", which is what a caller falling back to a generic label expects.
+# The newest year IF it is already known, without ever fetching. Returns undef
+# until something (a feed open, or the warm) has resolved it. Its one caller is
+# warmCache, which takes it as the top of the back-catalogue range and falls back
+# to the year it just warmed. `|| undef` collapses the 0 negative sentinel (see
+# getLatestYear) back to "not known", so that fallback applies.
 sub cachedLatestYear { return Plugins::PitchforkReviews::DB::kvGet('pfr:year:latest:4') || undef; }
 
 # (cachedYears / nextUncachedYear lived here. They served an incremental warm — the
@@ -551,6 +546,9 @@ sub cachedLatestYear { return Plugins::PitchforkReviews::DB::kvGet('pfr:year:lat
 # ALL years replaces outright. Deleted rather than left unused: a year-end list is a
 # fixed entity, so there was never anything for the warm to be incremental about.)
 
+# Every year we can offer, newest first. YEAR_MIN is the floor: 2016 is the
+# oldest list that parses cleanly under this shape (older ones use ad-hoc slugs
+# and a different body layout).
 sub yearsAvailable {
     my ($cb) = @_;
     getLatestYear(sub {

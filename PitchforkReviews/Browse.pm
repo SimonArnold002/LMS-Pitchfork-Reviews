@@ -1020,7 +1020,8 @@ sub _setHomeYearTitle {
 # Cheap on a warm store: _findPlayable matches are held (STREAM_FOUND_TTL, 30d), so
 # real work only happens for reviews that are new since the last run. Needs a
 # connected player for the streaming-service API context; with none it returns
-# false and _warmTick retries in seconds.
+# false and _warmTick retries, backing off from WARM_PLAYER_RETRY (20s) by doubling
+# to WARM_RETRY_MAX (300s) — Plugin::_warmRetryDelay.
 # ---------------------------------------------------------------------------
 
 # The warm's own resolve deadline (see the note in warmCache). Declared here
@@ -1806,8 +1807,11 @@ sub _sizeLabelSameTitled {
 # concern.
 #
 # The CAPSULE is here because `reviewDetail` — the only other place it lives — is
-# reachable ONLY by an UNMATCHED row, so the better a review resolved, the less of it
-# you could read: a matched album drilled straight into the tracklist. The row's own
+# reached only by a row DRAWN unmatched, so the better a review resolved, the less of it
+# you could read: a matched album drilled straight into the tracklist. (Drawn unmatched is
+# not the same as unmatched: a row past the render deadline resolves later, and its detail
+# page then lists the matches — the 1.0.6 code review, which is why `_sizeLabelSameTitled`
+# exists.) The row's own
 # line2 carries a copy, but truncated to ROW_CAPSULE_MAX.
 #
 # The Pitchfork GENRE is deliberately NOT injected here (`reviewDetail` does show it).
@@ -1845,7 +1849,8 @@ sub _attachReviewLink {
     # so without this the second album would be unreachable from a browse list
     # entirely: a matched row's drill-in is the matched album's TRACKLIST, not the
     # detail page, so `reviewDetail` (which does show every side) is only ever reached
-    # by rows that DIDN'T match. Each alt is a genuine service album node, so it stays
+    # by rows DRAWN unmatched (which includes a row matched after the render deadline).
+    # Each alt is a genuine service album node, so it stays
     # playable in its own right and drills into its own tracks.
     #
     # Labelled with PITCHFORK's side title, not the service's: the point of the row is
@@ -3434,8 +3439,8 @@ use constant ALT_RELEASE_MAX => 2;
 # The ranking above decides what the row plays, and it has to — Play/Add act on the list row
 # without anyone drilling in. But no ranking is right every time, and until now a MATCHED row
 # had no escape at all: it drills into the matched album's tracklist, so `reviewDetail` (with
-# its Refresh row, and the full candidate list) is reachable ONLY from a row that did not
-# match. A wrong match was silent and pinned for STREAM_FOUND_TTL.
+# its Refresh row, and the full candidate list) is reachable only from a row DRAWN unmatched
+# (a row matched after the render deadline included). A wrong match was silent and pinned for STREAM_FOUND_TTL.
 #
 # WHY NOT A RELEASE-TYPE FILTER, which is what the sibling plugin does (LBF 0.9.89 drops
 # single-typed candidates for a non-single release). LBF can, because MusicBrainz states the
@@ -3682,6 +3687,16 @@ sub _findPlayableReview {
                 # leading hit is a deluxe edition must not be thrown away when the plain
                 # edition is right behind it. An exact one is promoted to the front, since
                 # the row takes the first node.
+                #
+                # UNLESS THE SIDE ALREADY LEADS WITH A FOLDED-EXACT MATCH (code review of
+                # 1.0.8). That lead is `_rowPick`'s choice, made in the side's own resolve:
+                # among folded-exact titles the first that is not single-sized. The strict
+                # test here is `_norm`, which does not fold a trailing EP/LP, so for side
+                # 'Foo' the 5-track "Foo EP" reads loose and the 1-track "Foo" exact, and
+                # promoting the strict one would hand the row back to the single 1.0.3 moved
+                # it off. The GATE is unchanged: the side survives only if some candidate is
+                # strict-exact. A folded-exact lead is no fragment (its release key equals the
+                # side's), so leaving it in place keeps the 0.9.21 protection intact.
                 if ($requireAll) {
                     for my $s (0 .. $#parts) {
                         my $items = $perSide[$s] || [];
@@ -3691,7 +3706,8 @@ sub _findPlayableReview {
                         my ($ex) = grep { _matchExactness($parts[$s], $items->[$_]) eq 'exact' }
                                    0 .. $#$items;
                         if (defined $ex) {
-                            unshift @$items, splice(@$items, $ex, 1) if $ex;
+                            unshift @$items, splice(@$items, $ex, 1)
+                                if $ex && !_exactFolded($parts[$s], $items->[0]);
                             next;
                         }
                         _dbgv("combined review '$album': dropping side '$parts[$s]' — "
@@ -4104,7 +4120,7 @@ sub _findPlayable {
                             : "no match" . ($nErrored ? " ($nErrored inconclusive)" : "")
                                          . ($nUnavail ? " ($nUnavail unavailable)"   : "")
                                          . ($ttl == STREAM_NOMATCH_TTL ? '' : " ttl=$ttl")))
-            if _verbose();    # 1.0.9: `_dbgv` gates after its argument is built, and this runs on every resolve
+            if _verbose();    # code review of 1.0.8: `_dbgv` gates after its argument is built, and this runs on every resolve
 
         # THE WAITERS ARE SERVED BEFORE $callback, AND EACH ONE IS GUARDED. $callback
         # chains into the full feed render — a lot of code, any of which can die — and the

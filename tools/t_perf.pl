@@ -2406,6 +2406,48 @@ $T::Prefs::P{svc_priority_deezer} = 3;
         is('...and the exact one is promoted to lead the side', $m[0]{name}, 'EP2');
     }
 
+    # A SIDE THAT ALREADY LEADS WITH A FOLDED-EXACT MATCH KEEPS IT (code review of 1.0.8).
+    # Side 'Foo': the service lists the 1-track single "Foo" first and the 5-track "Foo EP"
+    # second. `_rowPick` puts the EP first (folded-exact, not single-sized). The strict test
+    # reads "Foo EP" as loose (`_norm` keeps the "ep"), so the old promotion moved the single
+    # back to the front and the side's row played it. Before the fix: 'Foo'.
+    {
+        @QUERIES = ();
+        Slim::Utils::Cache::reset(); Plugins::PitchforkReviews::DB::kvReset();
+        %SCRIPT = (); %BY_ALBUM = (
+            Qobuz => {
+                'foo' => [ { %{ $side->('Foo', 71) },    _size => 'single' },
+                           { %{ $side->('Foo EP', 72) }, _size => 'ep' } ],
+                'bar' => [ $side->('Bar', 73) ],
+            },
+        );
+        my $got;
+        $B->can('_findPlayableReview')->(undef, sub { $got = $_[0] }, 'Some Band', 'Foo/Bar');
+        my @m = grep { $_->{_svc} } @{ $got->{items} };
+        is('a folded-exact lead keeps the side (the EP, not the same-titled single)',
+            $m[0]{name}, 'Foo EP');
+        is('...the other side still follows it', $m[1]{name}, 'Bar');
+        ok('...and the single is still offered behind it', scalar(grep { $_->{name} eq 'Foo' } @m));
+    }
+
+    # CONTROL: the gate is unchanged. A side whose ONLY candidate is the folded-exact
+    # "Foo EP" has nothing strict-exact, so it is dropped as before (0.9.21's rule).
+    {
+        @QUERIES = ();
+        Slim::Utils::Cache::reset(); Plugins::PitchforkReviews::DB::kvReset();
+        %SCRIPT = (); %BY_ALBUM = (
+            Qobuz => {
+                'foo' => [ { %{ $side->('Foo EP', 74) }, _size => 'ep' } ],
+                'bar' => [ $side->('Bar', 75) ],
+            },
+        );
+        my $got;
+        $B->can('_findPlayableReview')->(undef, sub { $got = $_[0] }, 'Some Band', 'Foo/Bar');
+        my @m = grep { $_->{_svc} } @{ $got->{items} };
+        is('CONTROL: a side with no strict-exact candidate is still dropped', scalar(@m), 1);
+        is('...leaving only the other side', $m[0]{name}, 'Bar');
+    }
+
     # A SERVICE THAT GAVE NO TITLE DROPS THE SIDE. All three adapters stash `_svctitle`
     # today, so this is unreachable in production — but the rule has to decide something,
     # and "no evidence" must fall on the safe side rather than be read as agreement.
