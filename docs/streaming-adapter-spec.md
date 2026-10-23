@@ -229,6 +229,7 @@ album retries on every cycle for ever.
 | `_albumid` | Native album id — parse it from the item's uri if there is no bare id field | Favourites url / Listen to Later handshake |
 | `_svctitle` | The service's own raw album title. Not the rendered row label (which usually has the artist baked in) and not the MusicBrainz title | The album name sent in the handshake |
 | `_ctype` | LBF only: `_candReleaseType($rawAlbum)` — `album`, `single`, `ep`, or `''` | Dropping a same-named single for an album target |
+| `_ctc` | LBF only (1.0.40): `_candTrackCount($rawAlbum)` — the album's track count from the search row (`tracks_count`, `nb_tracks`, `numberOfTracks` or `total_tracks`, the first positive integer), or undef. Every LBF ALBUM adapter MUST stamp it: one that leaves it out fails silently, because undef reads as "keep" and that service's wrong-size matches are never dropped (`t_aliasmatch.pl` §5 checks the adapters that exist, not a new one) | The name-search size check: a match a NAME search finds on the second pass must be the release's size (`$sizeKeep`) |
 | `_size` | PFR only (1.0.3): `_candSize($rawAlbum)`, Discography's rule byte-identical — `album`, `ep`, `single`, or undef. Spotify goes through `_spotifySizeView` first. Qobuz search rows DO carry `tracks_count` (seen live 2026-10-21) | Which of two same-titled releases plays, offering the other, and the dedupe key. Never a reason to drop a candidate |
 | `_year` | `_svcYear($rawAlbum)` | Release-year fallback in date-ordered lists |
 
