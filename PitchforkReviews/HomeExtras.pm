@@ -21,7 +21,7 @@ use base qw(Plugins::MaterialSkin::HomeExtraBase);
 
 use Plugins::PitchforkReviews::Browse;
 
-use constant ICON => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIcon_svg.png';
+use constant ICON => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIconMono_svg.png';   # the single-colour mark (see Browse.pm HEADER_ICON)
 
 sub initPlugin {
     my ($class) = @_;

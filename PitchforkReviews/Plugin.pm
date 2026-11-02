@@ -191,8 +191,8 @@ sub initPlugin {
     # NB: OPMLBased takes the app/menu icon from install.xml <icon>
     # (_pluginDataFor('icon')) and ignores an icon => arg — same as the
     # ListenBrainz plugin. The _svg.png convention lets Material recolour the
-    # sibling .svg per theme: PitchforkReviewsIcon.svg is the Pitchfork round mark
-    # (ring in #000 so Material themes it; the arrows stay Pitchfork red).
+    # sibling .svg per theme: PitchforkReviewsIconMono.svg is the Pitchfork round mark,
+    # ring and arrows in one colour (1.0.9; renamed 1.0.11, see Browse.pm HEADER_ICON).
     $class->SUPER::initPlugin(
         tag    => 'pitchforkreviews',
         feed   => \&Plugins::PitchforkReviews::Browse::topLevel,

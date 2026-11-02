@@ -265,5 +265,41 @@ my $LINK = 'https://pitchfork.com/reviews/albums/x/';
     ok('CONTROL: an alt with no service carries none', !exists $out->[3]{extid});
 }
 
+# --- 8. every Pitchfork mark in a Material view is single-colour (1.0.9 / 1.0.10) ---------
+# Material recolours an icon only when it is named `_svg.png` (it then draws the `.svg`
+# beside it, rewriting #000 to the theme colour). The colour stays on the four section TILES
+# and the installed icon only — ledger §A2 `THE MATERIAL ICON IS SINGLE-COLOUR`.
+{
+    my (undef, $out) = render({ capsule => $CAP, link => $LINK });
+    like_svg('the "Read the full review" mark is the recolourable _svg.png form', $out->[1]{image});
+
+    my $src = join '', map { local (@ARGV, $/) = ($_); <> }
+        $BROWSE, 'PitchforkReviews/HomeExtras.pm', 'PitchforkReviews/Plugin.pm';
+    ok('no Material-facing code names the full-colour PitchforkReviewsIcon.png',
+        $src !~ /PitchforkReviewsIcon\.png/);
+    ok('CONTROL: the four section tiles are still the colour artwork',
+        4 == (() = $src =~ /images\/menu-[a-z-]+\.png'/g));
+
+    # 1.0.11: the file name is the browser's cache key (Material serves the .svg for 31 days under
+    # a URL only MATERIAL's version changes), so the views must not name the pre-1.0.9 file.
+    my $xml = do { local (@ARGV, $/) = ('PitchforkReviews/install.xml'); <> };
+    ok('no Material-facing code or install.xml names the old PitchforkReviewsIcon_svg.png',
+        "$src$xml" !~ /PitchforkReviewsIcon_svg\.png/);
+    my %named = map { $_ => 1 } "$src$xml" =~ m{(plugins/PitchforkReviews/html/images/[\w-]+)_svg\.png}g;
+    ok('install.xml <icon> is the single-colour mark',
+        $xml =~ m{<icon>plugins/PitchforkReviews/html/images/PitchforkReviewsIconMono_svg\.png</icon>});
+
+    # Every .svg Material can be asked for: each one the code names, plus the old name a home pin may hold.
+    for my $base ((sort keys %named), 'plugins/PitchforkReviews/html/images/PitchforkReviewsIcon') {
+        my ($name) = $base =~ m{([^/]+)$};
+        my $svg = do { local (@ARGV, $/) = ("PitchforkReviews/HTML/EN/$base.svg"); eval { <> } } // '';
+        ok("$name.svg exists beside its _svg.png", length $svg);
+        ok("$name.svg embeds no raster (Material cannot recolour one)", $svg !~ /<image\b/);
+        my @paint = $svg =~ /(?:fill|stroke)="([^"]*)"/g;
+        ok("$name.svg paints only #000 or none", @paint && !grep { $_ ne '#000' && $_ ne 'none' } @paint);
+    }
+}
+sub like_svg { my ($d, $g) = @_; ok("$d (got '" . ($g // '') . "')", ($g // '') =~ /_svg\.png$/) }
+
 printf "\n%d passed, %d failed\n", $p, $f;
 exit($f ? 1 : 0);

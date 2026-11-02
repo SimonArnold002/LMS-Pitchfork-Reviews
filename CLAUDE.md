@@ -80,6 +80,7 @@ because line numbers rot on the next edit.
 | `View: Score` needs no `_frozenOrder` (the score is fixed at parse, nothing warms it); PFR has no `index`/`quantity` mapping, so the rendered-rows drift class cannot arise; the `group_by` pref name is historical, kept to preserve stored choices | — | ``_frozenOrder` WAS CONSIDERED AND IS NOT NEEDED` |
 | Web skins (Default/Classic): ONE `_webify` pass from `topLevel` — `_div` dividers become styled textarea headings, text rows escaped textareas, `_webimg` icons, `_webBounce` for nextWindow, relative settings link; Material untouched. Ported from LBF 1.0.12 | A2 | `WEB SKINS GET ONE PASS` |
 | `_extid`, `extid`, service badge on a matched row / second-release row | A2, B | `THE MATCHED SERVICE IS A BADGE` |
+| `PitchforkReviewsIcon.svg` single-colour (no red arrows) in Material's Apps, settings and EVERY view (list headers, home-shelf headers, `LOGO_ICON` on "Read the full review"); colour stays ONLY on the four section tiles (`menu-*.png`) and the installed icon — a placement call (Simon, 1.0.9 + 1.0.10); file renamed `PitchforkReviewsIconMono` in 1.0.11 because the NAME is Material's 31-day cache key — new art needs a new name | A2 | `THE MATERIAL ICON IS SINGLE-COLOUR` |
 
 **Two standing rules that kill most repeat findings:**
 
@@ -237,6 +238,43 @@ always with its reason, and those stay suppressed. The code a fix added is new a
   - Material's other extid uses are on its library `albums_loop` / `playlists_loop` and its favourites
     `album_id:` path, which a plugin item_loop row never reaches (checked for Listening History the same day).
   Guard: `tools/t_reviewintro.pl` §7 (9, incl. 3 controls), anti-tested twice (no badge: 4 red; alt badge only: 1 red).
+
+- **THE MATERIAL ICON IS SINGLE-COLOUR — `PitchforkReviewsIcon.svg`, `HEADER_ICON`, `HomeExtras::ICON`,
+  `LOGO_ICON`, install.xml `<icon>`. Simon, 2026-11-02, passing on a request: Material's Apps view, settings
+  and headers should show a standard Material (theme-coloured) icon; the installed icon and "our buttons"
+  stay as they are. BUILT 1.0.9. Then, the same day: "you didn't change in the views, this needs to be the
+  same but not our tiles" — "our buttons" meant the four SECTION TILES (`BNM_TILE`, `HSA_TILE`,
+  `REVIEWS_TILE`, `YEAR_TILE`, `menu-*.png`), not "Read the full review". `LOGO_ICON` moved to the
+  `_svg.png` form, BUILT 1.0.10.** Every Material place that draws the plugin mark gets it through the `_svg.png`
+  name, which Material swaps for the `.svg` and recolours (`icon-mapping.js` `mapIconType`; `_svgHandler`
+  rewrites `#000` and every hex `fill`/`stroke`). Until 1.0.8 that `.svg` held the arrows as an EMBEDDED red
+  PNG, which no recolour can touch, so they stayed red. The `.svg` is now a 24x24 vector: a `#000` ring
+  (stroke 2) and the three arrows as one `#000` path, traced from the old raster (tips, 45° shafts,
+  63-unit right-angled heads, clip circle concentric with the ring, 97.8% pixel overlap with the original).
+  The ring is about 15% thinner than the logo's, to Material's 2-unit stroke, which opens the ring-to-arrows
+  gap to about 1 unit at 24 px. **Unchanged on purpose:** the four section tiles (`menu-*.png`, colour
+  artwork), `PitchforkReviewsIcon_svg.png` (the raster LMS's own plugin page and the Default/Classic skins
+  draw, still the colour PNG byte for byte, so the web skins' "Read the full review" mark is unchanged),
+  `PitchforkReviewsIcon.png` (now named only by the `repo.xml <icon>`, the plugin-manager list, and
+  `tools/make_covers.py`), and the three `pfr-*_MTL_icon_*` buttons (Material draws its own font icon for
+  those). Do not put a colour back in the `.svg` and do not report the colour PNGs as inconsistent with it:
+  the split IS the request. Guard: `t_reviewintro` §8 (the link row's mark is `_svg.png`; no `.pm` names
+  the colour PNG; CONTROL the four tiles; the `.svg` has no `<image>` and paints only `#000`/`none`) and
+  `t_webskin` (the web row's raster is the colour PNG byte for byte). Anti-tested: `LOGO_ICON` back on the
+  colour PNG fails 2 + 1; the 1.0.8 `.svg` fails the `<image>` check.
+  **THE FILE NAME IS THE CACHE KEY — renamed in 1.0.11.** Material serves `/material/svg/...` with
+  `Cache-Control: max-age=2678400` (31 days) and busts it only with `r=LMS_MATERIAL_REVISION`, never the
+  plugin version. After 1.0.10 Simon's headers still drew the GOLD ring with RED arrows (screenshot,
+  Week of 5 October) — the 1.0.8 file, while the server was sending the new one. Telling him to reload
+  was the wrong answer: every user who has seen the old icon is in the same state. So the mark is now
+  `PitchforkReviewsIconMono_svg.png` / `.svg` (install.xml `<icon>`, `HEADER_ICON`, `LOGO_ICON`,
+  `HomeExtras::ICON`), a URL no client has cached. **This departs from the fleet's `<Name>Icon` file
+  name on purpose.** The old `PitchforkReviewsIcon_svg.png` / `.svg` stay in the zip, single-colour, because
+  Material stores a pinned home item's `svg` path (`browse-functions.js` pin, `svg: item.svg`), so a pin
+  made before 1.0.11 still asks for the old name. **Any future change to the art needs a NEW file name
+  again.** Guard: `t_reviewintro` §8 (nothing names the old `_svg.png`; every `_svg.png` the code or
+  install.xml names, plus the old pair, has a pure single-colour `.svg`); anti-tested (`HEADER_ICON` back on
+  the old name: 1 fail there, 2 in `t_grouptoggle`).
 
 ### B. KNOWN-OPEN AND ACCEPTED — do not re-report as new
 
@@ -712,6 +750,65 @@ Repo `LMS-Pitchfork-Reviews`; plugin/package/dir `PitchforkReviews`
 "Pitchfork Reviews" with three feed tiles "Best New Music" + "High Scoring Albums" +
 "Latest Reviews". (The
 `arv:`/`AlbumReviews` names were the pre-rename identifiers — fully retired.)
+
+## Status: 1.0.11 — the single-colour mark under a NEW file name (dev BUILT 2026-11-02, INSTALLED, committed + PUSHED to dev 2026-11-02)
+
+Simon, on 1.0.10, with a screenshot: the week headers still showed red arrows in a gold ring, "what is it
+exactly you don't understand", then "I've done a clear". The server was sending the single-colour file
+(fetched at the header's own URL shape: no `<image>`); the client held the 1.0.8 one. Cause and decision:
+§A2 `THE MATERIAL ICON IS SINGLE-COLOUR` (THE FILE NAME IS THE CACHE KEY). **Changed:** new
+`PitchforkReviewsIconMono.svg` (the 1.0.10 vector) + `PitchforkReviewsIconMono_svg.png` (the colour PNG byte
+for byte); install.xml `<icon>`, `Browse.pm` `HEADER_ICON` / `LOGO_ICON`, `HomeExtras::ICON` point at it; old
+pair kept for pins; stale `Plugin.pm` comment ("the arrows stay Pitchfork red") fixed. **Tests:**
+`t_reviewintro` 59 -> 65, `t_grouptoggle` and `t_webskin` repointed; all 16 suites exit 0, 1,479.
+**Packaged:** `install.xml`/`repo.xml` 1.0.11 (1.0.10 is installed, read live); zip 28 entries, 337,914 bytes;
+`repo.xml <sha>` `82bb9267d623af480ebdea1d5e43bdf1cea79373`; unzipped `diff -r` identical to the tree; the
+three icon suites green against the extracted Browse.pm. **Live check owed:** with NO cache clear, the week
+headers, the Apps tile, the settings entry, the home-shelf headers and "Read the full review" all draw the
+mark in the theme colour; the four section tiles stay colour.
+**Installed 2026-11-02 (read live: `material-skin plugins` 1.0.11).** Right after the install Simon saw the
+Apps icon in COLOUR, then a few minutes later single-colour again with nothing changed. **Cause NOT found;
+Simon: "its fine stop looking".** Facts at the time: `myapps` sent `icon-id
+.../PitchforkReviewsIconMono_svg.png`; `/material/svg/.../PitchforkReviewsIconMono.svg` and the old-name
+`.svg` both answered 200, single-colour; Material's `iconMap` starts as `{}`, so the "map not loaded yet"
+race does not exist. If it recurs, note WHEN (straight after the restart? first open of Apps?) before
+theorising. **Open, Simon's call:** the four section tiles (`menu-*.png`, also on the year picker rows) are
+still colour artwork in Material; he later said "only the plugin icon in manage plugins needs to be coloured".
+
+## Status: 1.0.10 — the "Read the full review" mark is single-colour too (dev BUILT 2026-11-02, INSTALLED, superseded by 1.0.11; never committed on its own, carried by the 1.0.11 commit)
+
+Simon, after installing 1.0.9: "you didn't change in the views, this needs to be the same but not our
+tiles". Live over JSON-RPC (Dining Room, browse only) the list headers already named the `_svg.png`; the
+one colour mark left in a view was `LOGO_ICON` on a review page's "Read the full review" row (`icon:
+.../PitchforkReviewsIcon.png`). 1.0.9 had read "our buttons" as that row; it meant the section tiles.
+**Changed:** `Browse.pm` `LOGO_ICON` -> `PitchforkReviewsIcon_svg.png` (both call sites: the review link
+row, and `_webimg` on the web skins, which draw the same colour raster as before). The `.svg`'s comment no
+longer contains the literal `#000`, which Material's recolour was rewriting inside the comment too. No
+cache or key version moved, no string changed. **Tests:** `t_reviewintro` 54 -> 59 (§8), `t_webskin` 31 -> 32
+(its old assertion pinned the colour PNG's FILENAME; it now pins the `_svg.png` and that the raster is the
+colour PNG byte for byte); all 16 suites exit 0, 1,473. **Packaged:** `install.xml`/`repo.xml` 1.0.10 (1.0.9
+is installed, read live via `material-skin plugins`); zip 26 entries, 315,720 bytes; `repo.xml <sha>`
+`751321c7cd7ea1c7b92dea2a58b4f7e8f4841a39`; unzipped `diff -r` identical to the tree; `t_reviewintro` green
+against the extracted Browse.pm. **Live check owed:** a review page's "Read the full review" mark in the
+theme colour; the four section tiles still in colour; the Default skin's review page still showing the red
+mark. (Headers DID still show red: the browser's 31-day copy of the old file, fixed by the rename in 1.0.11.)
+
+## Status: 1.0.9 — a single-colour Material icon (dev BUILT 2026-11-02, INSTALLED, superseded by 1.0.10; carried by the 1.0.11 commit)
+
+Simon, passing on a request: the plugin icon in Material's Apps view, settings and headers should be a
+standard Material icon, not coloured; the installed icon and the buttons stay as they are. Record and
+reasoning: §A2 `THE MATERIAL ICON IS SINGLE-COLOUR`. **One file changed:** `PitchforkReviewsIcon.svg`
+(385px ring + embedded red PNG -> 24x24 vector, all `#000`). No `.pm` touched, no cache or key version moved
+(`STREAM_KEY_VERSION` 28, `PARSE_VERSION` 3), no string changed.
+**Packaged:** `install.xml`/`repo.xml` 1.0.9 (1.0.8 is installed); zip 26 entries, 315,661 bytes; `repo.xml
+<sha>` `bd0a9a7f94a7146688f58bf1c2c6e57c4b5c608b`; unzipped `diff -r` identical to the tree; the declared
+`<icon>` resolves inside the zip; the shipped `.svg` has no `<image>`. All 16 suites exit 0. Checked before
+install: Material's own recolour regexes run on the new file leave no `#000` and turn the ring and arrows to
+the one colour (rendered, scratchpad). **Live check owed:** Apps/My Music tile, the plugin's entry in
+Material's settings, a list's genre/week divider headers and the three PFR home shelves' headers should all
+draw the mark in the theme colour; LMS's plugin page keeps the red logo. ("Read the full review" was
+left red here, wrongly: 1.0.10.) A browser
+holding the old `/material/svg/...` icon may need a reload to show it.
 
 ## Status: the code review of 7b2bdf4 (2026-10-22, committed to dev 1691cc1 + PUSHED (round passed), NOT built)
 
@@ -4928,8 +5025,9 @@ divider ONLY when the `image` is the **`_svg.png`** Material-recolour form (or a
 not headers). 0.5.0/0.5.1 used the plain `PitchforkReviewsIcon.png` on the divider, so
 the logo never showed; 0.5.2 uses `HEADER_ICON` = `PitchforkReviewsIcon_svg.png` (theme-
 recoloured, `#000`-based SVG), matching LBF whose dividers use its `…Icon_svg.png`.
-`LOGO_ICON` (the full-colour raster) stays on the "Read the full review" row (a normal
-row, where a plain png renders fine).
+`LOGO_ICON` (the full-colour raster) stayed on the "Read the full review" row (a normal
+row, where a plain png renders fine) — until 1.0.10, when it moved to the `_svg.png` form
+(§A2 `THE MATERIAL ICON IS SINGLE-COLOUR`).
 Settings uses **radio buttons** not a `<select>` — Material doesn't always render a
 dropdown right. **Default is `'genre'`** (confirmed shipping default, user decision
 2026-07-08) so a fresh install shows genre grouping; NB `prefs->init` won't overwrite an
@@ -4939,10 +5037,12 @@ change shows on the next re-open of the list — no restart, no cache wait),
 `debug_log` (0.4.4: now actually wired — `Plugin::dbg`
 mirrors the resolve timeline to server.log at INFO always, and to a size-capped
 `pfr-debug.log` when on; `Browse::_dbg` is the alias, ported from LBF). **Icon:** the
-Pitchfork round mark, generated to spec — `PitchforkReviewsIcon.svg` (geometric
-ring in `#000` so Material recolours it per theme; the arrows are the embedded
-Pitchfork-red raster) plus `PitchforkReviewsIcon_svg.png` (install.xml ref /
-non-Material fallback) and `PitchforkReviewsIcon.png`, both real transparent PNGs.
+Pitchfork round mark, generated to spec — since 1.0.11 `PitchforkReviewsIconMono.svg` (a
+single-colour 24x24 vector, ring AND arrows in `#000`, so Material recolours the whole
+mark per theme; until 1.0.8 the arrows were an embedded Pitchfork-red raster — see §A2
+`THE MATERIAL ICON IS SINGLE-COLOUR`) plus `PitchforkReviewsIconMono_svg.png` (install.xml ref /
+non-Material fallback) and `PitchforkReviewsIcon.png`, both real transparent PNGs, still in colour.
+The pre-1.0.11 `PitchforkReviewsIcon_svg.png` / `.svg` stay for Material home pins.
 Source art is the user-supplied `Pitchfork_Media_(logo).png`; the icon builder is
 ad-hoc (measure ring radii + extract the red arrows in Pillow), not committed. On
 EVERY zip rebuild: bump the version (install.xml + repo.xml) AND recompute the sha

@@ -123,7 +123,12 @@ print "--- 2. the release page ---\n";
     is('the capsule is a textarea', $cap->{type}, 'textarea');
     is('... and ESCAPED, since a textarea is printed raw', $cap->{name}, 'A &lt;b&gt;capsule&lt;/b&gt; &amp; more.');
     my ($read) = grep { ($_->{weblink} // '') eq 'https://pitchfork.com/r/' } @it;
-    ok('Read the full review carries the Pitchfork mark on the web', ($read->{image} // '') =~ /PitchforkReviewsIcon\.png$/);
+    # 1.0.10: the row names the `_svg.png` so Material draws it single-colour; the web skins draw
+    # that raster, which must stay the full-colour mark byte for byte.
+    ok('Read the full review carries the Pitchfork mark on the web', ($read->{image} // '') =~ /PitchforkReviewsIconMono_svg\.png$/);
+    my $imgdir = 'PitchforkReviews/HTML/EN/plugins/PitchforkReviews/html/images';
+    my ($png, $svgpng) = map { local (@ARGV, $/) = ("$imgdir/$_"); <> } 'PitchforkReviewsIcon.png', 'PitchforkReviewsIconMono_svg.png';
+    ok('... and that raster IS the full-colour PNG, byte for byte', length($png // '') && $png eq ($svgpng // ''));
     my ($ref) = grep { ($_->{nextWindow} // '') eq 'refresh' } @it;
     ok('Refresh streaming match carries the refresh icon on the web', ($ref->{image} // '') =~ /pfr-refresh_MTL_icon_refresh\.png$/);
     ok('no private key leaks into a web row', !grep { exists $_->{_div} || exists $_->{_webimg} } @it);

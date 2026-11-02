@@ -8,7 +8,7 @@
 
 <module>Plugins::PitchforkReviews::Plugin</module>
 
-<version>1.0.8</version>
+<version>1.0.11</version>
 
 <description>Browse Pitchfork album reviews on your Squeezebox and play the reviewed album from your streaming library (Qobuz / Tidal / Deezer).</description>
 
@@ -16,7 +16,7 @@
 
 <homepageURL>https://simonarnold002.github.io/LMS-Pitchfork-Reviews/README.html</homepageURL>
 
-<icon>plugins/PitchforkReviews/html/images/PitchforkReviewsIcon_svg.png</icon>
+<icon>plugins/PitchforkReviews/html/images/PitchforkReviewsIconMono_svg.png</icon>
 
 <defaultState>enabled</defaultState>
 

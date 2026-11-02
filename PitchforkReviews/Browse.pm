@@ -399,8 +399,13 @@ use constant BNM_TILE        => 'plugins/PitchforkReviews/html/images/menu-best-
 use constant REVIEWS_TILE    => 'plugins/PitchforkReviews/html/images/menu-latest-reviews.png';           # branded section cover
 use constant HSA_TILE        => 'plugins/PitchforkReviews/html/images/menu-high-scoring-albums.png';      # branded section cover
 use constant YEAR_TILE       => 'plugins/PitchforkReviews/html/images/menu-best-albums-of-the-year.png';  # branded section cover
-use constant LOGO_ICON       => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIcon.png';          # Pitchfork round mark (full-colour raster) — marks the "Read the full review" link
-use constant HEADER_ICON     => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIcon_svg.png';      # divider/header icon — MUST be the `_svg.png` Material-recolour form: Material renders an icon on a header-basic divider ONLY for `_svg.png`/`_MTL_*` icons, NOT a plain .png (verified vs LBF, whose dividers use its _svg.png)
+use constant LOGO_ICON       => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIconMono_svg.png';  # Pitchfork round mark on the "Read the full review" link — the `_svg.png` form so Material draws it single-colour like every other mark in the views (1.0.10); the web skins draw this raster, which is the full-colour PNG byte for byte
+use constant HEADER_ICON     => 'plugins/PitchforkReviews/html/images/PitchforkReviewsIconMono_svg.png';  # divider/header icon — MUST be the `_svg.png` Material-recolour form: Material renders an icon on a header-basic divider ONLY for `_svg.png`/`_MTL_*` icons, NOT a plain .png (verified vs LBF, whose dividers use its _svg.png)
+# THE MARK'S FILE NAME IS ITS CACHE KEY (1.0.11). Material serves the `.svg` beside an `_svg.png` for 31 days
+# under a URL that changes only with MATERIAL's version, so changed art under an old name stays invisible in
+# every browser that saw the old file. New art = a new file name, here, in HomeExtras::ICON and install.xml.
+# The pre-1.0.11 pair (PitchforkReviewsIcon + _svg.png / .svg) stays, single-colour, for Material home pins
+# that stored that path (browse-functions.js keeps a pinned item's `svg`).
 # THE OLD WEB SKINS (Default / Classic) — see _webify. A divider there is a styled
 # heading (bold Pitchfork-red text over a rule in the same red), kept on ONE line because the skins run a
 # textarea's name through html_line_break. And the settings page must be linked

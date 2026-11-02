@@ -99,7 +99,7 @@ for my $mode ('genre', 'date') {
     ok("$mode: every divider is a real Material header type",
        0 == grep { ($_->{type} // '') !~ /^header(-basic)?$/ } @div);
     ok("$mode: every divider carries the branded header icon",
-       0 == grep { ($_->{image} // '') !~ /PitchforkReviewsIcon_svg\.png$/ } @div);
+       0 == grep { ($_->{image} // '') !~ /PitchforkReviewsIconMono_svg\.png$/ } @div);
     ok("$mode: a divider precedes the first review row",
        exists $rows->[0]{type} && !exists $rows->[0]{line1});
 }
